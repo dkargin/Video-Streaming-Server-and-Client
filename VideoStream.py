@@ -6,6 +6,10 @@ __author__ = 'Tibbers'
 class VideoStream:
     def __init__(self, filename):
         self.filename = filename
+        if filename[0] == '/':
+            filename = filename[1:]
+        if filename[-1] == '/':
+            filename = filename[:-1]
         try:
             self.file = open(filename, 'rb')
             print('-'*60 +  "\nVideo file : |" + filename +  "| read\n" + '-'*60)
