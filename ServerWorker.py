@@ -3,13 +3,16 @@ import time
 from random import randint
 import sys
 import traceback
-import threading
 import socket
+import threading
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
 
-import tornado
+
 from tornado.tcpserver import TCPServer
+from tornado.iostream import StreamClosedError
+from tornado import gen
+
 
 __author__ = 'Tibbers'
 
@@ -20,7 +23,7 @@ __author__ = 'Tibbers'
 
 
 # Implements RTSP protocol FSM
-class ServerWorker:
+class ServerWorker(TCPServer):
     SETUP = 'SETUP'
     OPTIONS = 'OPTIONS'
     PLAY = 'PLAY'
@@ -40,7 +43,7 @@ class ServerWorker:
         def __init__(self, status, seq, **kwargs):
             self.code = status
             self.seq = seq
-            self.Public = kwargs.get('Public', None)
+            self.values = kwargs
 
     # Command to open RTP port
     class CmdOpenRTP:
@@ -52,59 +55,59 @@ class ServerWorker:
         def __init__(self):
             pass
 
-    def __init__(self, clientInfo):
+    def __init__(self):
+        super(ServerWorker, self).__init__()
         # TODO: strip socket to a separate field
-        self.clientInfo = clientInfo
-        self._rtsp_socket = clientInfo['rtspSocket'][0]
+        self.clientInfo = {}
         self._rtp_socket = None
-        self._client_address = clientInfo['rtspSocket'][1]
+        self._client_address = None
         self._work_thread = None
         self._state = ServerWorker.INIT
         # Generate a randomized RTSP session ID
         self._session = randint(100000, 999999)
         print("Starting session id=%d" % self._session)
 
-    def run(self):
-        """
-        Run internal thread to handle rtsp requests
-        """
-        self._work_thread = threading.Thread(target=self._rtsp_request_handler)
-        self._work_thread.start()
-
-    def _rtsp_request_handler(self):
+    @gen.coroutine
+    def handle_stream(self, stream, address):
         """
         Receive RTSP request from the client.
         Works in a separate thread
         """
-        sock = self._rtsp_socket
         while True:
-            request_raw = sock.recv(256)
-            if request_raw is None or len(request_raw) == 0:
-                print("Should close a socket for some reason")
-                break
+            try:
+                request_raw = yield stream.read_until(b'\n\r')
+                #request_raw = sock.recv(256)
+                if request_raw is None or len(request_raw) == 0:
+                    print("Should close a socket for some reason")
+                    break
 
-            responses = 0
+                responses = 0
 
-            # Gather commands from rtsp protocol processor
-            for cmd in self._process_rtsp_request(request_raw.decode("utf-8")):
-                if isinstance(cmd, self.CmdRTSPResponse):  # Generated http response
-                    if self.send_reply_rtsp(sock, cmd):
+                # Gather commands from rtsp protocol processor
+                for cmd in self._process_rtsp_request(request_raw.decode("utf-8")):
+                    if isinstance(cmd, self.CmdRTSPResponse):  # Generated http response
+                        response_data = self.send_reply_rtsp(cmd)
+                        print("Responding=%s"%response_data)
+                        yield stream.write(response_data.encode())
                         responses += 1
 
-                elif isinstance(cmd, self.CmdOpenRTP):  # Should open UDP port for streaming
-                    # Create a new thread and start sending RTP packets
-                    # TODO: make proper implementation
-                    self.clientInfo["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    self.clientInfo['event'] = threading.Event()
-                    self.clientInfo['worker'] = threading.Thread(target=self.send_rtp)
-                    self.clientInfo['worker'].start()
-                elif isinstance(cmd, self.CmdCloseRTP):  # Should close UDP port
-                    # Close the RTP socket
-                    # Should do some reference counting before such rude disconnect
-                    self.clientInfo['rtpSocket'].close()
+                    elif isinstance(cmd, self.CmdOpenRTP):  # Should open UDP port for streaming
+                        # Create a new thread and start sending RTP packets
+                        # TODO: make proper implementation
+                        self.clientInfo["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        self.clientInfo['event'] = threading.Event()
+                        self.clientInfo['worker'] = threading.Thread(target=self.send_rtp)
+                        self.clientInfo['worker'].start()
+                    elif isinstance(cmd, self.CmdCloseRTP):  # Should close UDP port
+                        # Close the RTP socket
+                        # Should do some reference counting before such rude disconnect
+                        self.clientInfo['rtpSocket'].close()
 
-            if responses != 1:
-                print("RTSP FSM is broken. Have generated %d responses" % responses)
+                if responses != 1:
+                    print("RTSP FSM is broken. Have generated %d responses" % responses)
+
+            except StreamClosedError:
+                break
 
     def _process_rtsp_request(self, raw_data):
         """
@@ -122,15 +125,15 @@ class ServerWorker:
         header_line = request[0].split(' ')
         request_type = header_line[0]
 
-        print("REQ=%s;\n" % str(header_line))
-        print("DATA=%s;\n" % str(request[1]))
+        print("REQ=%s;" % str(header_line))
+        print("DATA=%s;" % str(request[1]))
         # Get the RTSP sequence number
         seq = request[1].split(' ')
 
         # Process SETUP request
         if request_type == self.OPTIONS:
-            # DESCRIBE
-            yield self.CmdRTSPResponse(self.OK_200, seq[1], Public="SETUP, TEARDOWN, PLAY, PAUSE")
+            yield self.CmdRTSPResponse(self.OK_200, seq[1], Public="DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE")
+            #yield self.CmdRTSPResponse(self.OK_200, seq[1], )
         elif request_type == self.SETUP:
             if self._state == self.INIT:
                 # Get the media file name
@@ -183,6 +186,9 @@ class ServerWorker:
             self.clientInfo['event'].set()
             yield self.CmdRTSPResponse(self.OK_200, seq[0])
             yield self.CmdCloseRTP()
+        else:
+            print("Unhandled message!!!")
+            yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, seq[0])
 
     def send_rtp(self):
         """Send RTP packets over UDP."""
@@ -239,7 +245,7 @@ class ServerWorker:
 
         return packet.getPacket()
 
-    def send_reply_rtsp(self, sock, reply):
+    def send_reply_rtsp(self, reply):
         """
         :param sock: Socket to send data
         :param reply:ServerWorker.CmdRTSPResponse http reply
@@ -248,23 +254,31 @@ class ServerWorker:
         code = reply.code
         seq = reply.seq
 
-        reply_data = 'RTSP/1.0'
+        msg = 'RTSP/1.0 '
+
+        def add_data(data, field, value):
+            data += ("%s: %s\r\n" % (str(field), str(value)))
+            return data
+
         # Send RTSP reply to the client
         if code == self.OK_200:
-            reply_data += '200 OK\n'
-
+            msg += '200 OK\r\n'
         # Error messages
         elif code == self.FILE_NOT_FOUND_404:
             print("404 NOT FOUND")
-            reply_data += '404 Not Found\n'
+            msg += '404 Not Found\r\n'
         elif code == self.CON_ERR_500:
             print("500 CONNECTION ERROR")
-            reply_data += '500 Internal Server Error\n'
+            msg += '500 Internal Server Error\r\n'
 
-        reply_data += 'CSeq: ' + seq + '\nSession: ' + str(self._session)
+        msg = add_data(msg, 'Cseq', reply.seq)
+        #msg = add_data(msg, 'Session', self._session)
+        if reply.values is not None:
+            for key, value in reply.values.items():
+                msg = add_data(msg, key, value)
 
-        if reply.Public is not None:
-            reply_data += "Public: %s\n" % str(reply.Public)
+        # Finish it!
+        msg += '\r\n'
+        msg += '\r\n'
 
-        sock.send(bytearray(reply_data.encode()))
-        return True
+        return msg
