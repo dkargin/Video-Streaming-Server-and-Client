@@ -7,9 +7,16 @@ import threading
 import socket
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
+
+import tornado
 from tornado.tcpserver import TCPServer
 
 __author__ = 'Tibbers'
+
+
+#class MainHandler(tornado.web.RequestHandler):
+#    def get(self):
+#        self.write("Hello, world")
 
 
 # Implements RTSP protocol FSM
@@ -30,9 +37,10 @@ class ServerWorker:
 
     # RTSP response
     class CmdRTSPResponse:
-        def __init__(self, status, data):
-            self.status = status
-            self.data = data
+        def __init__(self, status, seq, **kwargs):
+            self.code = status
+            self.seq = seq
+            self.Public = kwargs.get('Public', None)
 
     # Command to open RTP port
     class CmdOpenRTP:
@@ -53,9 +61,8 @@ class ServerWorker:
         self._work_thread = None
         self._state = ServerWorker.INIT
         # Generate a randomized RTSP session ID
-        session = randint(100000, 999999)
-        print("Starting session id=%d" % session)
-        self.clientInfo['session'] = session
+        self._session = randint(100000, 999999)
+        print("Starting session id=%d" % self._session)
 
     def run(self):
         """
@@ -81,7 +88,7 @@ class ServerWorker:
             # Gather commands from rtsp protocol processor
             for cmd in self._process_rtsp_request(request_raw.decode("utf-8")):
                 if isinstance(cmd, self.CmdRTSPResponse):  # Generated http response
-                    if self.send_reply_rtsp(cmd.status, cmd.data):
+                    if self.send_reply_rtsp(sock, cmd):
                         responses += 1
 
                 elif isinstance(cmd, self.CmdOpenRTP):  # Should open UDP port for streaming
@@ -105,7 +112,7 @@ class ServerWorker:
         @:rtype: tuple with HTTP status and data
         """
         # Get the request type
-        request = raw_data.split('\n')
+        request = raw_data.split('\r\n')
 
         if len(request) < 2:
             print("Corrupted RTSP request")
@@ -115,13 +122,15 @@ class ServerWorker:
         header_line = request[0].split(' ')
         request_type = header_line[0]
 
-        print("REQ=%s" % str(header_line))
+        print("REQ=%s;\n" % str(header_line))
+        print("DATA=%s;\n" % str(request[1]))
         # Get the RTSP sequence number
         seq = request[1].split(' ')
 
         # Process SETUP request
         if request_type == self.OPTIONS:
-            yield self.CmdRTSPResponse(self.OK_200, seq[1])
+            # DESCRIBE
+            yield self.CmdRTSPResponse(self.OK_200, seq[1], Public="SETUP, TEARDOWN, PLAY, PAUSE")
         elif request_type == self.SETUP:
             if self._state == self.INIT:
                 # Get the media file name
@@ -230,17 +239,32 @@ class ServerWorker:
 
         return packet.getPacket()
 
-    def send_reply_rtsp(self, code, seq):
-        """Send RTSP reply to the client."""
+    def send_reply_rtsp(self, sock, reply):
+        """
+        :param sock: Socket to send data
+        :param reply:ServerWorker.CmdRTSPResponse http reply
+        :return:
+        """
+        code = reply.code
+        seq = reply.seq
+
+        reply_data = 'RTSP/1.0'
+        # Send RTSP reply to the client
         if code == self.OK_200:
-            reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
-            self._rtsp_socket.send(bytearray(reply.encode()))
-            return True
+            reply_data += '200 OK\n'
 
         # Error messages
         elif code == self.FILE_NOT_FOUND_404:
             print("404 NOT FOUND")
+            reply_data += '404 Not Found\n'
         elif code == self.CON_ERR_500:
             print("500 CONNECTION ERROR")
+            reply_data += '500 Internal Server Error\n'
 
-        return False
+        reply_data += 'CSeq: ' + seq + '\nSession: ' + str(self._session)
+
+        if reply.Public is not None:
+            reply_data += "Public: %s\n" % str(reply.Public)
+
+        sock.send(bytearray(reply_data.encode()))
+        return True
