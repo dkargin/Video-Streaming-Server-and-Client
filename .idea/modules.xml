@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/CNProject.iml" filepath="$PROJECT_DIR$/.idea/CNProject.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/python_rtsp.iml" filepath="$PROJECT_DIR$/.idea/python_rtsp.iml" />
     </modules>
   </component>
 </project>
