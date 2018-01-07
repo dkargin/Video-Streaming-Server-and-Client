@@ -10,8 +10,8 @@ def main():
     except:
         print("[Usage: server_main.py Server_port]\n")
 
-    server = ServerWorker()
-    server.listen(SERVER_PORT)
+    server = ServerWorker(SERVER_PORT)
+
     IOLoop.current().start()
 
 # Program Start Point

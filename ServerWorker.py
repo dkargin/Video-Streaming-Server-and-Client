@@ -14,7 +14,6 @@ from tornado.ioloop import PeriodicCallback
 
 __author__ = 'Tibbers'
 
-RTP_UDP_PORT = 9500
 
 mjpeg_sdp = """v=0
 o=- 1272052389382023 1 IN IP4 0.0.0.0
@@ -33,12 +32,48 @@ a=cliprect:0,0,720,1280
 a=framerate:25.000000
 a=rtpmap:0 PCMU/8000/1"""
 
+mjpeg_sdp_format = """v=0
+o=- 1272052389382023 1 IN IP4 0.0.0.0
+s=%s
+i=jpeg
+t=0 0
+a=tool:%s
+a=type:broadcast
+a=control:*
+a=range:npt=0-
+a=x-qt-text-nam:%s
+a=x-qt-text-inf:jpeg
+m=video %d RTP/AVP 26
+c=IN IP4 0.0.0.0
+a=cliprect:0,0,%d,%d
+a=framerate:%f"""
 
-#a=control:*
 
-def make_sdp(video_opt):
-    return mjpeg_sdp
+def make_sdp(video_opt={}):
+    sname = video_opt.get('session_name', 'Anystream')
+    server_name = video_opt.get('server_name', 'Python RTSP server')
+    video_port = video_opt.get('video_port', 0)
+    audio_port = video_opt.get('audio_port', 0)
+    fps = video_opt.get('fps', 25.0)
+    width = video_opt.get('width', 1280)
+    height = video_opt.get('height', 1280)
 
+    return mjpeg_sdp_format % (sname, server_name, sname, video_port, height, width, float(fps))
+
+
+# Dumps list data to a semicolon-separated string
+def dump_list(data):
+    result = ""
+    first = True
+
+    for item in data:
+        if first:
+            result += str(item)
+            first = False
+        else:
+            result += ';'
+            result += str(item)
+    return result
 
 # Contains protocol-specific constants
 class Protocol:
@@ -98,21 +133,44 @@ StatusCodes = {
     551: 'Option not supported'
 }
 
+INIT = 0
+READY = 1
+PLAYING = 2
+PAUSE = 3
+DONE = 4
+
 
 class ClientInfo:
-    def __init__(self, address):
+    def __init__(self, address, id):
         # Port range to receive RTP data
-        self.rtp_ports = None
+        print("Generating ClientInfo for %s, id=%d" % (str(address), id))
+        self.id = id
         self.address = address
-        self.state = None
-        self.last_command = None
+        self._state = INIT
+        self.rtp_ports = None
         self.unicast = False
+        self.interleaved = False
         self.rtp = False
+
+    def reset(self):
+        self._state = INIT
+        self.rtp_ports = None
+        self.unicast = False
+        self.interleaved = False
+        self.rtp = False
+
+    @property
+    def state(self):
+        return self._state
+
+    def set_state(self, new_state):
+        self._state = new_state
 
     def set_rtp_ports(self, start, end):
         self.rtp_ports = range(start, end)
 
     def parse_transport_options(self, transport):
+        self.reset()
         # Transport example: 'RTP/AVP;unicast;client_port=9500-9501'
         transport_items = transport.split(';')
 
@@ -132,17 +190,18 @@ class ClientInfo:
                 else:
                     print("Unrecognized client port")
                     self.rtp_ports = None
+            elif item.startswith('interleaved'):
+                self.interleaved = True
 
 
 # Implements RTSP protocol FSM
 class ServerWorker(TCPServer):
-    INIT = 0
-    READY = 1
-    PLAYING = 2
-    PAUSE = 3
-
     OK_200 = 200
+    BAD_REQUEST_400 = 400
     FILE_NOT_FOUND_404 = 404
+    METHOD_NOT_ALLOWED_405 = 405
+    UNSUPPORTED_MEDIA_TYPE_415 = 415
+    UNSUPPORTED_TRANSPORT_461 = 461
     CON_ERR_500 = 500
 
     # RTSP response
@@ -167,29 +226,31 @@ class ServerWorker(TCPServer):
         def __init__(self):
             pass
 
-    def __init__(self):
+    def __init__(self, port):
         super(ServerWorker, self).__init__()
 
         # Maps address->client
         self.clients = {}
-        self.video_opt = {}
+        self.video_opt = {'video_port':8400}
         self._rtp_socket = None
         self._rtp_pub_ports = range(8888, 8889)
         self._local_address = '127.0.0.1'
         self._client_address = None
         self._work_thread = None
-        self._state = ServerWorker.INIT
+        self._last_client_id = 0
         # Frame provider
         self._stream = None
         # Generate a randomized RTSP session ID
         self._session = randint(100000, 999999)
-        print("Starting session id=%d" % self._session)
+        print("Starting session id=%d at port %d" % (self._session, port))
 
         # Frame generator
         self._frame_generator = PeriodicCallback(self._gen_rtp_frame, 40)
 
+        self.listen(port)
+
     def _get_client(self, address):
-        return self.clients.get(address)
+        return self.clients.get("%s:%d" % address)
 
     @gen.coroutine
     def handle_stream(self, stream, address):
@@ -208,7 +269,12 @@ class ServerWorker(TCPServer):
 
             except StreamClosedError:
                 print("Stream from %s has been closed" % str(address))
+                self._remove_client(address)
                 break
+
+    def _remove_client(self, address):
+        if address in self.clients:
+            self.clients.pop(address)
 
     def _handle_raw_request(self, stream, request_raw, address):
         responses = 0
@@ -227,7 +293,7 @@ class ServerWorker(TCPServer):
                     out = None
 
                 if isinstance(cmd, self.CmdRTSPResponse):  # Generated http response
-                    response_data = self.send_reply_rtsp(cmd)
+                    response_data = self.serialise_reply_rtsp(cmd)
                     print("Responding=%s" % response_data)
                     yield stream.write(response_data.encode())
                     responses += 1
@@ -245,10 +311,11 @@ class ServerWorker(TCPServer):
                         self._rtp_socket.close()
                         self._rtp_socket = None
                 elif isinstance(cmd, self.CmdInitClient):
+                    address_str = "%s:%d" % address
                     if address not in self.clients:
-                        print("Creating ClientInfo for %s" % str(address))
-                        client = ClientInfo(address)
-                        self.clients[address] = ClientInfo(address)
+                        self._last_client_id += 1
+                        client = ClientInfo(address[0], self._last_client_id)
+                        self.clients[address_str] = client
                         out = client # Will send it back to coroutine
                     else:
                         print("Picking existing ClientInfo for %s" % str(address))
@@ -299,13 +366,11 @@ class ServerWorker(TCPServer):
             client = yield self.CmdInitClient()
 
         # Update state
-        print("SETUP Request received for %s\n" % url.path)
-        if self._state == self.INIT:
+        if client.state == INIT:
             try:
-                print("Initializing stream")
+                print("Initializing stream for %s" % url.path)
+                # TODO: Make a proper stream pool
                 self._stream = VideoStream(url.path)
-                self._state = self.READY
-
             except IOError:
                 yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, seq)
                 return
@@ -315,15 +380,38 @@ class ServerWorker(TCPServer):
         transport = request.get('transport')
 
         if transport is None:
-            yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, seq)
+            print("No transport info specified")
+            yield self.CmdRTSPResponse(self.UNSUPPORTED_TRANSPORT_461, seq)
             return
 
         client.parse_transport_options(transport)
 
+        if client.interleaved:
+            print("Interleaved RTSP stream is not supported")
+            values = {
+                'Transport': request.get('transport')
+            }
+            yield self.CmdRTSPResponse(self.UNSUPPORTED_TRANSPORT_461, seq, values)
+            return
+
+        # Create a new socket for RTP/UDP. We need this info to tell client where to listen
+        yield self.CmdOpenRTP()
+
+        transport_options = ['RTP/AVP']  # Hardcoded, huh?
+        if client.unicast:
+            transport_options.append('unicast')
+        if client.rtp_ports:
+            transport_options.append("client_port=%d-%d" % (client.rtp_ports.start, client.rtp_ports.stop))
+        #if self._local_address:
+        #    transport_options.append("source=%s" % self._local_address)
+        #if self._rtp_pub_ports:
+        #    transport_options.append("server_port=%d-%d" % (self._rtp_pub_ports.start, self._rtp_pub_ports.stop))
+
         values = {
             'Session': self._session,
-            'Transport': request.get('transport', 'RTP/AVP;unicast')
+            'Transport': dump_list(transport_options)
         }
+        client.set_state(READY)
         yield self.CmdRTSPResponse(self.OK_200, seq, **values)  # seq[0] the sequenceNum received from Client.py
 
     def _response_play(self, request, client):
@@ -331,40 +419,50 @@ class ServerWorker(TCPServer):
         Process PLAY request
         :param request:HttpMessage
         """
-        if self._state == self.READY:
+
+        # RTP-Info: url=rtsp://192.168.0.254/jpeg/track1;seq=20730;rtptime=3869319494,url=rtsp://192.168.0.254/jpeg/track2;seq=33509;rtptime=3066362516
+        rtp_info = [request.url_raw]
+        rtp_info.append('seq=0')
+        rtp_info.append('rtptime=0')
+        values = {
+            'Session': self._session,
+            'Range': request.get('range'),
+            'RTP-Info': dump_list(rtp_info)
+        }
+
+        if client.state == READY:
             print("READY->PLAYING")
-            self._state = self.PLAYING
-            yield self.CmdRTSPResponse(self.OK_200, request.seq)
-            # Create a new socket for RTP/UDP
-            yield self.CmdOpenRTP()
+            client.set_state(PLAYING)
+            yield self.CmdRTSPResponse(self.OK_200, request.seq, **values)
             return
         # Process RESUME request
-        elif self._state == self.PAUSE:
+        elif client.state == PAUSE:
             print("PAUSE->PLAYING")
-            self._state = self.PLAYING
-            yield self.CmdRTSPResponse(self.OK_200, request.seq)
+            client.set_state(PLAYING)
+            yield self.CmdRTSPResponse(self.OK_200, request.seq, **values)
             return
         else:
-            raise "Should handle this. Was at state=%d" % self._state
+            raise Exception("Should handle this. Was at state=%d" % client.state)
 
     def _response_pause(self, request, client):
         """
         Process PAUSE request
         :param request:HttpMessage
         """
-        if self._state == self.PLAYING:
+        if client.state == PLAYING:
             print('PLAYING->READY')
             #print('-' * 60 + "\nPAUSE Request Received\n" + '-' * 60)
-            #self._state = self.READY
+            client.set_state(READY)
             yield self.CmdRTSPResponse(self.OK_200, request.seq)
         else:
-            raise "Should handle this at state %d" % self._state
+            raise Exception("Should handle this at state %d" % client.state)
 
     def _response_teardown(self, request, client):
         """
         Process TEARDOWN request
         :param request:HttpMessage
         """
+        client.set_state(DONE)
         yield self.CmdRTSPResponse(self.OK_200, request.seq)
         yield self.CmdCloseRTP()
 
@@ -377,7 +475,7 @@ class ServerWorker(TCPServer):
         request = HttpMessage()
         if not request.deserialize(raw_data):
             print("Corrupted RTSP request")
-            # TODO: Should we return something meaningful?
+            yield self.CmdRTSPResponse(self.BAD_REQUEST_400, request.seq)
             return
 
         client = self._get_client(address)
@@ -387,7 +485,7 @@ class ServerWorker(TCPServer):
             yield from handler(self, request, client)
         else:
             print("Unhandled RTSP method %s!!!" % str(request.type))
-            yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, request.seq)
+            yield self.CmdRTSPResponse(self.METHOD_NOT_ALLOWED_405, request.seq)
 
     def _gen_rtp_frame(self):
         data = self._stream.nextFrame()
@@ -402,6 +500,12 @@ class ServerWorker(TCPServer):
     # Returns a list of pairs (address, port)
     def _get_rtp_destinations(self):
         result = []
+
+        # Add own addresses
+        #if self._rtp_pub_ports is not None and self._local_address is not None:
+        #    for port in self._rtp_pub_ports:
+        #        result.append((self._local_address, port))
+
         for key, client in self.clients.items():
             if client.rtp_ports is not None:
                 result.append((client.address, client.rtp_ports[0]))
@@ -410,9 +514,17 @@ class ServerWorker(TCPServer):
     # Publish frame to all clients
     def publish_rtp_frame(self, frame, frameNumber):
         data = self.makeRtp(frame, frameNumber)
+        data_len = len(data)
+        if data_len == 0:
+            print("Empty data for some reason")
+            return
         destinations = self._get_rtp_destinations()
         for address in destinations:
-            self._rtp_socket.sendto(data, address)
+            sent_len = self._rtp_socket.sendto(data, address)
+            if sent_len < 0:
+                print("System error in sendto %s" % address)
+            elif sent_len < data_len:
+                print("Sent %d of %d to %s" % (sent_len, data_len, address))
 
     def makeRtp(self, payload, frameNbr):
         """RTP-packetize the video data."""
@@ -430,7 +542,7 @@ class ServerWorker(TCPServer):
 
         return packet.getPacket()
 
-    def send_reply_rtsp(self, reply):
+    def serialise_reply_rtsp(self, reply):
         """
         :param sock: Socket to send data
         :param reply:ServerWorker.CmdRTSPResponse http reply
@@ -440,18 +552,9 @@ class ServerWorker(TCPServer):
         # TODO: move it to HttpMessage.serialize
         code = reply.code
 
-        msg = 'RTSP/1.0 '
+        msg = 'RTSP/1.0 %d %s\r\n' % (code, StatusCodes.get(code, 'Unknown code'))
 
         # Send RTSP reply to the client
-        if code == self.OK_200:
-            msg += '200 OK\r\n'
-        # Error messages
-        elif code == self.FILE_NOT_FOUND_404:
-            print("404 NOT FOUND")
-            msg += '404 Not Found\r\n'
-        elif code == self.CON_ERR_500:
-            print("500 CONNECTION ERROR")
-            msg += '500 Internal Server Error\r\n'
 
         def add_data(data, field, value):
             data += ("%s: %s\r\n" % (str(field), str(value)))
