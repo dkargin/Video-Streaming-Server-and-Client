@@ -1,17 +1,14 @@
 from random import randint
-import socket
 import re
-from time import time
 
 from VideoStream import VideoStream
-from RtpPacket import RtpPacket
+from RtpServer import RtpServer
 
 from HttpMessage import HttpMessage
 
 from tornado.tcpserver import TCPServer
 from tornado.iostream import StreamClosedError
 from tornado import gen
-from tornado.ioloop import PeriodicCallback
 
 __author__ = 'Tibbers'
 
@@ -20,8 +17,6 @@ References:
 
 - SDP: Session Description Protocol
 https://tools.ietf.org/html/rfc4566
-
-
 """
 
 # Hardcoded SDP for our test stream
@@ -52,7 +47,7 @@ t=0 0
 a=tool:%s
 a=type:broadcast
 a=control:*
-a=range:npt=0-
+a=recvonly
 a=x-qt-text-nam:%s
 a=x-qt-text-inf:jpeg
 m=video %d RTP/AVP 26
@@ -61,7 +56,7 @@ a=cliprect:0,0,%d,%d
 a=framerate:%f"""
 
 
-def make_sdp(video_opt={}):
+def make_sdp(video_opt):
     """
     Fill in SDP string, using specified video options
     :param video_opt: Table containing video options
@@ -74,7 +69,7 @@ def make_sdp(video_opt={}):
     audio_port = video_opt.get('audio_port', 0)
     fps = video_opt.get('fps', 25.0)
     width = video_opt.get('width', 1280)
-    height = video_opt.get('height', 1280)
+    height = video_opt.get('height', 720)
 
     return mjpeg_sdp_format % (sname, server_name, sname, video_port, height, width, float(fps))
 
@@ -160,18 +155,29 @@ DONE = 4
 
 
 class ClientInfo:
+    """
+    Contains receiver parameters
+    It mostly covers transport stuff
+    """
     def __init__(self, address, id):
         # Port range to receive RTP data
         print("Generating ClientInfo for %s, id=%d" % (str(address), id))
+        # Unique ID of this client
         self.id = id
+        # IP address, that was obtained from http/rtsp session
         self.address = address
+        # Server state
         self._state = INIT
+        # Requested ports for RTP transmission
         self.rtp_ports = None
         self.unicast = False
         self.interleaved = False
         self.rtp = False
 
     def reset(self):
+        """
+        Reset local data to default state
+        """
         self._state = INIT
         self.rtp_ports = None
         self.unicast = False
@@ -189,6 +195,10 @@ class ClientInfo:
         self.rtp_ports = range(start, end)
 
     def parse_transport_options(self, transport):
+        """
+        Parse transport string from RTSP DESCRIBE request
+        :param transport:string with transport requirements
+        """
         self.reset()
         # Transport example: 'RTP/AVP;unicast;client_port=9500-9501'
         transport_items = transport.split(';')
@@ -214,7 +224,7 @@ class ClientInfo:
 
 
 # Implements RTSP protocol FSM
-class ServerWorker(TCPServer):
+class RtspServer(TCPServer):
     OK_200 = 200
     BAD_REQUEST_400 = 400
     FILE_NOT_FOUND_404 = 404
@@ -246,25 +256,19 @@ class ServerWorker(TCPServer):
             pass
 
     def __init__(self, port):
-        super(ServerWorker, self).__init__()
+        super(RtspServer, self).__init__()
 
         # Maps address->client
         self.clients = {}
         self.video_opt = {'video_port':8400}
-        self._rtp_socket = None
-        self._rtp_pub_ports = range(8888, 8889)
+        self._rtp_server = RtpServer()
         self._local_address = '127.0.0.1'
         self._client_address = None
         self._work_thread = None
         self._last_client_id = 0
-        # Frame provider
-        self._stream = None
         # Generate a randomized RTSP session ID
         self._session = randint(100000, 999999)
         print("Starting session id=%d at port %d" % (self._session, port))
-
-        # Frame generator
-        self._frame_generator = PeriodicCallback(self._gen_rtp_frame, 40)
 
         self.listen(port)
 
@@ -318,17 +322,9 @@ class ServerWorker(TCPServer):
                     responses += 1
 
                 elif isinstance(cmd, self.CmdOpenRTP):  # Should open UDP port for streaming
-                    if self._rtp_socket is None:
-                        # Create a new thread and start sending RTP packets
-                        self._rtp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        self._frame_generator.start()
+                    self._rtp_server.start()
                 elif isinstance(cmd, self.CmdCloseRTP):  # Should close UDP port
-                    if self._rtp_socket is not None:
-                        self._frame_generator.stop()
-                        # Close the RTP socket
-                        # Should do some reference counting before such rude disconnect
-                        self._rtp_socket.close()
-                        self._rtp_socket = None
+                    self._rtp_server.stop()
                 elif isinstance(cmd, self.CmdInitClient):
                     address_str = "%s:%d" % address
                     if address not in self.clients:
@@ -390,6 +386,7 @@ class ServerWorker(TCPServer):
                 print("Initializing stream for %s" % url.path)
                 # TODO: Make a proper stream pool
                 self._stream = VideoStream(url.path)
+                self._rtp_server.set_stream(self._stream)
             except IOError:
                 yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, seq)
                 return
@@ -423,8 +420,12 @@ class ServerWorker(TCPServer):
             transport_options.append("client_port=%d-%d" % (client.rtp_ports.start, client.rtp_ports.stop))
         #if self._local_address:
         #    transport_options.append("source=%s" % self._local_address)
-        if self._rtp_pub_ports:
-            transport_options.append("server_port=%d-%d" % (self._rtp_pub_ports.start, self._rtp_pub_ports.stop))
+        #if self._rtp_pub_ports:
+        ports = self._rtp_server.get_server_ports()
+        if ports:
+            start = ports.start
+            end = ports.stop
+            transport_options.append("server_port=%d-%d" % (start, end))
 
         values = {
             'Session': self._session,
@@ -506,71 +507,12 @@ class ServerWorker(TCPServer):
             print("Unhandled RTSP method %s!!!" % str(request.type))
             yield self.CmdRTSPResponse(self.METHOD_NOT_ALLOWED_405, request.seq)
 
-    def _gen_rtp_frame(self):
-        data = self._stream.nextFrame()
-
-        if data is None:
-            return
-
-        frameNumber = self._stream.frameNbr()
-
-        self.publish_rtp_frame(data, frameNumber)
-
-    # Returns a list of pairs (address, port)
-    def _get_rtp_destinations(self):
-        result = []
-
-        # Add own addresses
-        #if self._rtp_pub_ports is not None and self._local_address is not None:
-        #    for port in self._rtp_pub_ports:
-        #        result.append((self._local_address, port))
-
-        for key, client in self.clients.items():
-            if client.rtp_ports is not None:
-                result.append((client.address, client.rtp_ports[0]))
-        return result
-
-    # Publish frame to all clients
-    def publish_rtp_frame(self, frame, frameNumber):
-
-        packet = RtpPacket()
-        packet.pt = 26
-        packet.seqnum = frameNumber
-        timestamp = int(time())
-        packet.encode(timestamp, frame)
-
-        data = packet.getPacket()
-        data_len = len(data)
-        if data_len == 0:
-            print("Empty data for some reason")
-            return
-        destinations = self._get_rtp_destinations()
-        for address in destinations:
-            sent_len = self._rtp_socket.sendto(data, address)
-            if sent_len < 0:
-                print("System error in sendto %s" % address)
-            elif sent_len < data_len:
-                print("Sent %d of %d to %s" % (sent_len, data_len, address))
-
-    def make_rtp(self, payload, frameNbr):
-        """RTP-packetize the video data."""
-        #version = 2
-        #padding = 0
-        #extension = 0
-        #cc = 0
-        #marker = 0
-        #pt = 26 # MJPEG type
-        #seqnum = frameNbr
-        #ssrc = 0
-        pass
-
     def serialise_reply_rtsp(self, reply):
         """
         :param sock: Socket to send data
         :param reply:ServerWorker.CmdRTSPResponse http reply
         :return:
         """
-
         # TODO: move it to HttpMessage.serialize
         code = reply.code
 

@@ -1,21 +1,28 @@
-Video-Stream-with-RTSP-and-RTP
+# RTSP/RTP server in python #
+
+Forked from [Video-Streaming-Server-and-Client](https://github.com/TibbersDriveMustang/Video-Streaming-Server-and-Client).
+I am trying to make it completely compatible with real RTSP clients, like VLC or ffplay
+
+Requirements:
+- python 3.5. I use a lot of `yield from` in protocol FSMs
+- tornado, to spin my lovely coroutines and do socket stuff
+- pil/pillow
+- tkinter
+- pyzmq - for local communication between RTSP/RTP server and data provider
+
 How to:
 
-Example:
+# Running #
 
     Open a terminal:
-        python Server.py 1025
+        python server_main.py 1025
 
     Open another terminal:
         python ClientLauncher.py 127.0.0.1 1025 5008 video.mjpeg
 
-
-
-
-
 Start the server with the command line
 	
-		python Server.py server_port
+		python server_main.py server_port
 	
 	Where server_port is the port your server listens to for incoming RTSP connections
 	    # 1025
@@ -24,8 +31,17 @@ Start the server with the command line
 
 Open a new terminal
 
+ffmpeg:
+`ffplay -loglevel debug -i rtsp://localhost:1025/video.mjpeg`
+
+live555 testRTSPClient (used in VLC):
+`./testProgs/testRTSPClient rtsp://localhost:1025/video.mjpeg`
+
+VLC:
+`vlc --verbose=1 --file-logging --logfile=vlc-log.txt blablabla`
+
 	Start the client with the command line
-		
+
 		python ClientLauncher.py server_host server_port RTP_port video_file
 
 	Where 
@@ -38,19 +54,6 @@ Open a new terminal
 		# video_file : name of video file you want to request,here "video.mjpeg"
 	
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 		@ file format
 			Lab`s` proprietary MJPEG(Motion JPEG) format
 				# The server streams a video which has been encoded into a proprietary MJPEG file format
@@ -59,7 +62,6 @@ Open a new terminal
 				# Server parses the bitstream of MJPEG file to extract the JPEG images
 				# Server sends the images to client at periodic intervals
 				# Client then displays the individual JPEG images sent from server			
-        
 
         @ Client 
             
@@ -104,22 +106,3 @@ Open a new terminal
 
                     *** Must insert CSeq header in every request you send
                             Which starts at 1 and incremented by one for each request you send
-
-What we need to implement
-
-    @ Client.py
-        # SETUP function
-        # PLAY function
-        # PAUSE function
-        # TEARDOWN function
-
-    @ RtpPacket.py
-        # Set the RTP-version filed(V) = 2
-        # Set padding(P), extension(X), # of contributing sources(CC), and marker(M) fields => all to 0
-        # Set payload type field(PT). we use MJPEG type, type number is 26
-        # Set sequence number.(frameNbr argument)
-        # Set timestamp (via Python time module)
-        # Set source identifier(SSRC)(identifies the server,pick an ID you like)
-        # We have no other contributing sources(field CC == 0), the CSRC-field does not exist. The packet header is 12 bytes
-
-    

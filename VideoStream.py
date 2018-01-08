@@ -49,11 +49,11 @@ class VideoStream:
             self.frameNum += 1
             #print('-'*10 + "\nNext Frame (#" + str(self.frameNum) + ") length:" + str(framelength) + "\n" + '-'*10)
 
-            return frame
+            return frame, self.frameNum
         else:
             print("Got wrong number of bytes. Is it EOF?")
             self.reopen()
-            return None
+            return None, None
 
     def frameNbr(self):
         """Get frame number."""

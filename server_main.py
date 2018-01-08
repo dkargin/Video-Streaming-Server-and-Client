@@ -1,6 +1,6 @@
 import sys
 from tornado.ioloop import IOLoop
-from RtspServer import ServerWorker
+from RtspServer import RtspServer
 
 
 def main():
@@ -10,7 +10,7 @@ def main():
     except:
         print("[Usage: server_main.py Server_port]\n")
 
-    server = ServerWorker(SERVER_PORT)
+    server = RtspServer(SERVER_PORT)
 
     IOLoop.current().start()
 
