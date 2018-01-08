@@ -1,6 +1,7 @@
 from random import randint
 import socket
 import re
+from time import time
 
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
@@ -14,7 +15,17 @@ from tornado.ioloop import PeriodicCallback
 
 __author__ = 'Tibbers'
 
+"""
+References:
 
+- SDP: Session Description Protocol
+https://tools.ietf.org/html/rfc4566
+
+
+"""
+
+# Hardcoded SDP for our test stream
+# I try to make it as minimal as possible for test purposes
 mjpeg_sdp = """v=0
 o=- 1272052389382023 1 IN IP4 0.0.0.0
 s=Session streamed by "nessyMediaServer"
@@ -32,6 +43,7 @@ a=cliprect:0,0,720,1280
 a=framerate:25.000000
 a=rtpmap:0 PCMU/8000/1"""
 
+# Refactored SDP header. Used for python formatting
 mjpeg_sdp_format = """v=0
 o=- 1272052389382023 1 IN IP4 0.0.0.0
 s=%s
@@ -50,6 +62,12 @@ a=framerate:%f"""
 
 
 def make_sdp(video_opt={}):
+    """
+    Fill in SDP string, using specified video options
+    :param video_opt: Table containing video options
+    :return:string sdp
+    """
+
     sname = video_opt.get('session_name', 'Anystream')
     server_name = video_opt.get('server_name', 'Python RTSP server')
     video_port = video_opt.get('video_port', 0)
@@ -74,6 +92,7 @@ def dump_list(data):
             result += ';'
             result += str(item)
     return result
+
 
 # Contains protocol-specific constants
 class Protocol:
@@ -517,7 +536,8 @@ class ServerWorker(TCPServer):
         packet = RtpPacket()
         packet.pt = 26
         packet.seqnum = frameNumber
-        packet.encode(frame)
+        timestamp = int(time())
+        packet.encode(timestamp, frame)
 
         data = packet.getPacket()
         data_len = len(data)
