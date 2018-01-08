@@ -404,8 +404,8 @@ class ServerWorker(TCPServer):
             transport_options.append("client_port=%d-%d" % (client.rtp_ports.start, client.rtp_ports.stop))
         #if self._local_address:
         #    transport_options.append("source=%s" % self._local_address)
-        #if self._rtp_pub_ports:
-        #    transport_options.append("server_port=%d-%d" % (self._rtp_pub_ports.start, self._rtp_pub_ports.stop))
+        if self._rtp_pub_ports:
+            transport_options.append("server_port=%d-%d" % (self._rtp_pub_ports.start, self._rtp_pub_ports.stop))
 
         values = {
             'Session': self._session,
