@@ -513,7 +513,13 @@ class ServerWorker(TCPServer):
 
     # Publish frame to all clients
     def publish_rtp_frame(self, frame, frameNumber):
-        data = self.makeRtp(frame, frameNumber)
+
+        packet = RtpPacket()
+        packet.pt = 26
+        packet.seqnum = frameNumber
+        packet.encode(frame)
+
+        data = packet.getPacket()
         data_len = len(data)
         if data_len == 0:
             print("Empty data for some reason")
@@ -526,21 +532,17 @@ class ServerWorker(TCPServer):
             elif sent_len < data_len:
                 print("Sent %d of %d to %s" % (sent_len, data_len, address))
 
-    def makeRtp(self, payload, frameNbr):
+    def make_rtp(self, payload, frameNbr):
         """RTP-packetize the video data."""
-        version = 2
-        padding = 0
-        extension = 0
-        cc = 0
-        marker = 0
-        pt = 26 # MJPEG type
-        seqnum = frameNbr
-        ssrc = 0
-
-        packet = RtpPacket()
-        packet.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload)
-
-        return packet.getPacket()
+        #version = 2
+        #padding = 0
+        #extension = 0
+        #cc = 0
+        #marker = 0
+        #pt = 26 # MJPEG type
+        #seqnum = frameNbr
+        #ssrc = 0
+        pass
 
     def serialise_reply_rtsp(self, reply):
         """
