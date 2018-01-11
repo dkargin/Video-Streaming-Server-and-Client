@@ -101,38 +101,42 @@ class RtpPacket:
             i += 4 + self.ExtensionHeaderLength
         self.Payload = self.Datagram[12+i:]
     """
-
-    def decode(self, data_raw):
+    def decode(self, data_raw, start=0, end=0):
         """
         Decode the RTP packet
         Copies incoming data into local fields and parses it
-        :return:bool
         """
         # Copy data into our header
         if len(data_raw) <= self.HEADER_SIZE:
-            print("Data chunk is too short to fit a header. Got only %d bytes" % len(data_raw))
-            return False
-        self._header_raw[:] = data_raw[:self.HEADER_SIZE]
+            raise Exception("Data chunk is too short to fit a header. Got only %d bytes" % len(data_raw))
+
+        self._header_raw[:] = data_raw[start:start + self.HEADER_SIZE]
         header = self._header_raw
+
         # Parse all the stuff
-        byte0 = data_raw[0]
-        byte1 = data_raw[1]
-        self._version = (byte0 & 1 << 6)
+        self._version = int(header[0] >> 6)
+        self.extension = (header[0] >> 5) & 0x1
+        self.marker = (header[1] >> 7)
+        """
         header[0] = self._version << 6
         header[0] |= self.padding << 5
         header[0] |= self.extension << 4
         header[0] |= self.cc
         header[1] = self.marker << 7
         header[1] |= self.pt
-
+        """
         # Stripping payload part
 
-        self._version = int(header[0] >> 6)
         # header[2] shift left for 8 bits then does bit or with header[3]
         self.seqnum = int(header[2] << 8 | header[3])
         self.timestamp = int(header[4] << 24 | header[5] << 16 | header[6] << 8 | header[7])
         self.pt = header[1] & 127
 
         header_size = self.HEADER_SIZE
-        self.payload = data_raw[header_size:]
-        return True
+        if self.extension:
+            header_size += 4
+
+        if end == 0:
+            end = len(data_raw)
+
+        self.payload = data_raw[start + header_size:end]
