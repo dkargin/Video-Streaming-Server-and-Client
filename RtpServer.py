@@ -3,6 +3,7 @@ from RtpPacket import RtpPacket
 import socket
 from time import time
 
+from VideoStream import VideoStream, Jpeg
 
 class RtpServer:
     """
@@ -60,7 +61,7 @@ class RtpServer:
         #    for port in self._rtp_pub_ports:
         #        result.append((self._local_address, port))
 
-        for key, dest in self._destinations:
+        for key, dest in self._destinations.items():
             result.append(dest)
         return result
 
@@ -73,6 +74,13 @@ class RtpServer:
 
         if frame_data is None:
             return
+
+        test_jpeg = Jpeg()
+        #try:
+        test_jpeg.parse(frame_data)
+        print("Obtained JPEG frame size=%dx%d"%(test_jpeg.Width, test_jpeg.Height))
+        #except:
+        #    print("This frame seems to be broken")
 
         # Generate RTP packet
         packet = RtpPacket()
@@ -89,7 +97,7 @@ class RtpServer:
         destinations = self._get_rtp_destinations()
 
         for address in destinations:
-            sent_len = self._socket[0].sendto(data, address)
+            sent_len = self._sockets[0].sendto(data, address)
             if sent_len < 0:
                 print("System error in sendto %s" % address)
             elif sent_len < data_len:

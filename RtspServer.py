@@ -12,67 +12,6 @@ from tornado import gen
 
 __author__ = 'Tibbers'
 
-"""
-References:
-
-- SDP: Session Description Protocol
-https://tools.ietf.org/html/rfc4566
-"""
-
-# Hardcoded SDP for our test stream
-# I try to make it as minimal as possible for test purposes
-mjpeg_sdp = """v=0
-o=- 1272052389382023 1 IN IP4 0.0.0.0
-s=Session streamed by "nessyMediaServer"
-i=jpeg
-t=0 0
-a=tool:Tiny python RTSP server
-a=type:broadcast
-a=control:*
-a=range:npt=0-
-a=x-qt-text-nam:Session streamed by "nessyMediaServer"
-a=x-qt-text-inf:jpeg
-m=video 0 RTP/AVP 26
-c=IN IP4 0.0.0.0
-a=cliprect:0,0,720,1280
-a=framerate:25.000000
-a=rtpmap:0 PCMU/8000/1"""
-
-# Refactored SDP header. Used for python formatting
-mjpeg_sdp_format = """v=0
-o=- 1272052389382023 1 IN IP4 0.0.0.0
-s=%s
-i=jpeg
-t=0 0
-a=tool:%s
-a=type:broadcast
-a=control:*
-a=recvonly
-a=x-qt-text-nam:%s
-a=x-qt-text-inf:jpeg
-m=video %d RTP/AVP 26
-c=IN IP4 0.0.0.0
-a=cliprect:0,0,%d,%d
-a=framerate:%f"""
-
-
-def make_sdp(video_opt):
-    """
-    Fill in SDP string, using specified video options
-    :param video_opt: Table containing video options
-    :return:string sdp
-    """
-
-    sname = video_opt.get('session_name', 'Anystream')
-    server_name = video_opt.get('server_name', 'Python RTSP server')
-    video_port = video_opt.get('video_port', 0)
-    audio_port = video_opt.get('audio_port', 0)
-    fps = video_opt.get('fps', 25.0)
-    width = video_opt.get('width', 1280)
-    height = video_opt.get('height', 720)
-
-    return mjpeg_sdp_format % (sname, server_name, sname, video_port, height, width, float(fps))
-
 
 # Dumps list data to a semicolon-separated string
 def dump_list(data):
@@ -247,20 +186,24 @@ class RtspServer(TCPServer):
 
     # Command to open RTP port
     class CmdOpenRTP:
-        def __init__(self):
-            pass
+        def __init__(self, client):
+            """
+            :param client:ClientInfo
+            """
+            self.client = client
 
     # Command to close RTP port
     class CmdCloseRTP:
-        def __init__(self):
-            pass
+        def __init__(self, client):
+            self.client = client
 
     def __init__(self, port):
         super(RtspServer, self).__init__()
 
         # Maps address->client
         self.clients = {}
-        self.video_opt = {'video_port':8400}
+        self.video_opt = {'video_port': 8400}
+        self._stream = None
         self._rtp_server = RtpServer()
         self._local_address = '127.0.0.1'
         self._client_address = None
@@ -322,8 +265,10 @@ class RtspServer(TCPServer):
                     responses += 1
 
                 elif isinstance(cmd, self.CmdOpenRTP):  # Should open UDP port for streaming
+                    self._rtp_server.add_destination(cmd.client, (cmd.client.address, cmd.client.rtp_ports.start))
                     self._rtp_server.start()
                 elif isinstance(cmd, self.CmdCloseRTP):  # Should close UDP port
+                    self._rtp_server.remove_destination(cmd.client)
                     self._rtp_server.stop()
                 elif isinstance(cmd, self.CmdInitClient):
                     address_str = "%s:%d" % address
@@ -340,7 +285,7 @@ class RtspServer(TCPServer):
                 break
 
         if responses != 1:
-            # TODO: Just send a default response here
+            # TODO: Just send a default server response here
             raise ("RTSP FSM is broken. Have generated %d responses instead of single one!" % responses)
 
     # RTSP method handlers
@@ -359,7 +304,16 @@ class RtspServer(TCPServer):
         """
         # Get the media file name
         filename = request.url_raw
-        sdp = make_sdp(self.video_opt)
+
+        url = request.url
+
+        print("Initializing stream for %s" % url.path)
+        if self._stream is None:
+            # TODO: Make a proper stream pool
+            self._stream = VideoStream(url.path)
+
+        sdp = self._stream.get_sdp(self.video_opt)
+
         values = {
             'x-Accept-Dynamic-Rate': 1,
             'Content-Base': filename,
@@ -372,7 +326,6 @@ class RtspServer(TCPServer):
         Process SETUP request
         :param request:HttpMessage
         """
-        # Get the media file name
         url = request.url
         seq = request.seq
 
@@ -383,9 +336,6 @@ class RtspServer(TCPServer):
         # Update state
         if client.state == INIT:
             try:
-                print("Initializing stream for %s" % url.path)
-                # TODO: Make a proper stream pool
-                self._stream = VideoStream(url.path)
                 self._rtp_server.set_stream(self._stream)
             except IOError:
                 yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, seq)
@@ -411,7 +361,7 @@ class RtspServer(TCPServer):
             return
 
         # Create a new socket for RTP/UDP. We need this info to tell client where to listen
-        yield self.CmdOpenRTP()
+        yield self.CmdOpenRTP(client)
 
         transport_options = ['RTP/AVP']  # Hardcoded, huh?
         if client.unicast:
@@ -440,8 +390,13 @@ class RtspServer(TCPServer):
         :param request:HttpMessage
         """
 
-        # RTP-Info: url=rtsp://192.168.0.254/jpeg/track1;seq=20730;rtptime=3869319494,url=rtsp://192.168.0.254/jpeg/track2;seq=33509;rtptime=3066362516
-        rtp_info = [request.url_raw]
+        """
+        Example RTP-Info:
+        RTP-Info: url=rtsp://192.168.0.254/jpeg/track1;seq=20730;rtptime=3869319494,url=rtsp://192.168.0.254/jpeg/track2;seq=33509;rtptime=3066362516
+        """
+        rtp_info = list()
+        rtp_info.append(request.url_raw)
+        # TODO: Get a proper seq/rtptime
         rtp_info.append('seq=0')
         rtp_info.append('rtptime=0')
         values = {
@@ -471,7 +426,6 @@ class RtspServer(TCPServer):
         """
         if client.state == PLAYING:
             print('PLAYING->READY')
-            #print('-' * 60 + "\nPAUSE Request Received\n" + '-' * 60)
             client.set_state(READY)
             yield self.CmdRTSPResponse(self.OK_200, request.seq)
         else:
@@ -484,7 +438,7 @@ class RtspServer(TCPServer):
         """
         client.set_state(DONE)
         yield self.CmdRTSPResponse(self.OK_200, request.seq)
-        yield self.CmdCloseRTP()
+        yield self.CmdCloseRTP(client)
 
     def _process_rtsp_request(self, raw_data, address):
         """
