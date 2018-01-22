@@ -65,7 +65,7 @@ class RtpPacket:
         header0 |= self.cc
 
         data_raw[offset+0] = header0
-        data_raw[offset+1] = (self.marker << 7) | self.pt
+        data_raw[offset+1] = ((self.marker&0x1) << 7) | (self.pt & 0x7f)
         data_raw[offset+2] = (self.seqnum >> 8) & 0xFF
         data_raw[offset+3] = self.seqnum & 0xFF
 

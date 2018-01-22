@@ -77,8 +77,9 @@ class RtpServer:
     def sockets_invalid(self):
         return self._sockets is not None
 
-    def _publish_rtp_frame(self, data_raw):
+    def _publish_rtp_frame(self, rtp_packet):
         destinations = self._get_rtp_destinations()
+        data_raw = rtp_packet.raw_packet
 
         data_len = len(data_raw)
 
@@ -113,4 +114,4 @@ class RtpServer:
             raise Exception("RtpServer got invalid rtp packet")
             self._restart_stream()
 
-        self._publish_rtp_frame(rtp_packet.raw_packet)
+        self._publish_rtp_frame(rtp_packet)

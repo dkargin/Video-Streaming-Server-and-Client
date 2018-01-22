@@ -299,7 +299,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
         super(RtpJpegEncoder, self).__init__()
         self.jpeg_TypeSpecific = 0
         self.jpeg_Type = 0
-        self.jpeg_Q = 0
+        self.jpeg_Q = 128
         self.jpeg_QT_MBZ = 0
         self.jpeg_QT_Precision = 0
         self.seq = 0
@@ -445,7 +445,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
             output += qt
             offset += 132
 
-        output += jpeg.image_data[jpeg_offset:jpeg_offset:frame_length]
+        output += jpeg.image_data[jpeg_offset:jpeg_offset+frame_length]
 
         jpeg_offset += frame_length
         return output, jpeg_offset
@@ -458,9 +458,6 @@ class RtpJpegEncoder(RtpFrameGenerator):
         :param max_datagram_size:
         :return:
         """
-        packet = self._create_rtp_packet()
-        packet.seqnum = self.seq
-        packet.timestamp = self.get_timestamp_90khz(timestamp)
         """
         // Initialize RTP header
         rtphdr.version = 2;
@@ -477,11 +474,20 @@ class RtpJpegEncoder(RtpFrameGenerator):
         total_length = len(jpeg.image_data)
         result = []
         done = jpeg_offset >= total_length
+        first = True
 
         while not done:
+            packet = self._create_rtp_packet()
+            packet.seqnum = self.seq
+            packet.timestamp = self.get_timestamp_90khz(timestamp)
+
             frame_length = min(max_datagram_size, total_length-jpeg_offset)
             data, jpeg_offset = self.make_rtp_frame_payload(jpeg, jpeg_offset, frame_length)
             done = jpeg_offset >= total_length
+
+            #if first:
+            #    packet.marker = 1
+            #    first = False
 
             if done:
                 packet.marker = 1
@@ -489,7 +495,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
             # TODO: hide it inside RtpPacket
             # We should implement copyless jpeg serialization as well
             header_size = packet.calc_header_size()
-            packet.raw_packet = bytearray(header_size + frame_length)
+            packet.raw_packet = bytearray(header_size + len(data))
             packet.encode_header(packet.raw_packet, 0)
             packet.raw_packet[header_size:] = data
 
@@ -520,6 +526,11 @@ class RtpJpegFileStream(RtpJpegEncoder):
         self._generator = None
         self.read_data()
 
+    def get_sdp(self, options):
+        options['width'] = self._jpeg.width
+        options['height'] = self._jpeg.height
+        return super(RtpJpegFileStream, self).get_sdp(options)
+
     def read_data(self):
         file = open(self._path, 'rb')
         raw_data = file.read()
@@ -534,7 +545,10 @@ class RtpJpegFileStream(RtpJpegEncoder):
 
     def restart_generator(self):
         def frame_generator():
-            for frame in self._frames:
+            timestamp = time()
+            frames = self.encode_rtp(timestamp, self._jpeg, self._packet_size)
+
+            for frame in frames:
                 yield frame
 
         if self._generator is None:
@@ -549,6 +563,7 @@ class RtpJpegFileStream(RtpJpegEncoder):
                 frame = next(self._generator)
                 return frame
             except StopIteration:
+                self._generator = None
                 self.restart_generator()
         return None
 

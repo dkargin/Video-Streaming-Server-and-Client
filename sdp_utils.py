@@ -75,6 +75,7 @@ a=recvonly
 a=x-qt-text-nam:{session_name}
 a=x-qt-text-inf:jpeg
 m=video {video_port} RTP/AVP {payload}
+a=control:rtsp://{url}:{rtsp_port}/{video_path}
 c=IN IP4 0.0.0.0
 a=cliprect:0,0,{height},{width}
 a=framerate:{fps}"""
@@ -87,7 +88,11 @@ a=framerate:{fps}"""
         'payload': 26,
         'fps': 0,
         'width': 1280,
-        'height': 720
+        'height': 720,
+        'control_url': '*',
+        'url': '127.0.0.7',
+        'rtsp_port': '1025',
+        'video_path': 'video.mjpg',
     }
     options.update(video_opt)
     return mjpeg_sdp_format2.format(**options)
