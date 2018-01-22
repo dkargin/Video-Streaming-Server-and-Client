@@ -277,7 +277,7 @@ class RtspServer(TCPServer):
                     self._rtp_server.add_destination(cmd.client, (cmd.client.address, cmd.client.rtp_ports.start))
                     self._rtp_server.start()
                 elif isinstance(cmd, self.CmdCloseRTP):  # Should close UDP port
-                    self._rtp_server.remove_destination(cmd.client)
+                    self._rtp_server.remove_destination(cmd.client, cmd.client.address)
                     self._rtp_server.stop()
                 elif isinstance(cmd, self.CmdInitClient):
                     address_str = "%s:%d" % address
