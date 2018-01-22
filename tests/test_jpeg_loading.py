@@ -1,5 +1,10 @@
-from JpegFile import JPEGFile
+from JpegStream import JpegFile
 import argparse
+
+"""
+Testing here Jpeg file loader
+"""
+
 
 parser = argparse.ArgumentParser(description='Test JPEG loader')
 parser.add_argument('file', metavar='N', help='jpeg file to load')
@@ -17,7 +22,7 @@ if raw_data is None:
 
 print("Loaded %d bytes" % len(raw_data))
 
-image = JPEGFile()
+image = JpegFile()
 
 image.load_data(raw_data)
 

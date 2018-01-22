@@ -8,7 +8,7 @@ from tkinter import *
 
 from PIL import Image
 
-from RtpPacket import RtpPacket
+from RtpFrameGenerator import RtpPacket
 
 __author__ = 'Tibbers'
 

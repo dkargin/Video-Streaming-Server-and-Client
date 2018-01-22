@@ -1,13 +1,13 @@
 from random import randint
 import re
 
-from VideoStream import VideoStream
 from RtpServer import RtpServer
 
 from HttpMessage import HttpMessage
 
 from tornado.tcpserver import TCPServer
 from tornado.iostream import StreamClosedError
+from tornado.ioloop import IOLoop
 from tornado import gen
 
 __author__ = 'Tibbers'
@@ -197,12 +197,13 @@ class RtspServer(TCPServer):
         def __init__(self, client):
             self.client = client
 
-    def __init__(self, port):
+    def __init__(self, port, stream_factory):
         super(RtspServer, self).__init__()
 
         # Maps address->client
         self.clients = {}
         self.video_opt = {'video_port': 8400}
+        self._stream_factory = stream_factory
         self._stream = None
         self._rtp_server = RtpServer()
         self._local_address = '127.0.0.1'
@@ -217,6 +218,10 @@ class RtspServer(TCPServer):
 
     def _get_client(self, address):
         return self.clients.get("%s:%d" % address)
+
+    @staticmethod
+    def run():
+        IOLoop.current().start()
 
     @gen.coroutine
     def handle_stream(self, stream, address):
@@ -239,6 +244,10 @@ class RtspServer(TCPServer):
                 break
 
     def _remove_client(self, address):
+        """
+        Removes client from RTP publish list
+        :param address: address tuple  of a client
+        """
         if address in self.clients:
             self.clients.pop(address)
 
@@ -259,7 +268,7 @@ class RtspServer(TCPServer):
                     out = None
 
                 if isinstance(cmd, self.CmdRTSPResponse):  # Generated http response
-                    response_data = self.serialise_reply_rtsp(cmd)
+                    response_data = self._serialise_reply_rtsp(cmd)
                     print("Responding=%s" % response_data)
                     yield stream.write(response_data.encode())
                     responses += 1
@@ -312,7 +321,7 @@ class RtspServer(TCPServer):
         if self._stream is None:
             # TODO: Make a proper stream pool
             try:
-                self._stream = VideoStream(url.path)
+                self._stream = self._stream_factory(url.path)
             except FileNotFoundError as e:
                 yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, request.seq)
                 return
@@ -466,7 +475,7 @@ class RtspServer(TCPServer):
             print("Unhandled RTSP method %s!!!" % str(request.type))
             yield self.CmdRTSPResponse(self.METHOD_NOT_ALLOWED_405, request.seq)
 
-    def serialise_reply_rtsp(self, reply):
+    def _serialise_reply_rtsp(self, reply):
         """
         :param sock: Socket to send data
         :param reply:ServerWorker.CmdRTSPResponse http reply
@@ -495,7 +504,7 @@ class RtspServer(TCPServer):
             msg += '\r\n'
             msg += data
         else:
-            # Finish it!
+            # Finish him!
             msg += '\r\n'
 
         return msg

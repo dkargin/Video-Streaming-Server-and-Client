@@ -1,9 +1,7 @@
 from tornado.ioloop import PeriodicCallback
-from RtpPacket import RtpPacket
+from RtpFrameGenerator import RtpPacket, RtpFrameGenerator
 import socket
 from time import time
-
-from VideoStream import VideoStream, Jpeg
 
 
 class RtpServer:
@@ -79,35 +77,17 @@ class RtpServer:
     def sockets_invalid(self):
         return self._sockets is not None
 
-    # Publish frame to all clients
-    def _gen_rtp_frame(self):
-        if self.socketsInvalid():
-            self.init_sockets()
-
-        # I do not know what is inside. Maybe we should cover somehow this data format?
-        # Supposing this is MJPEG frame. Will we decode it here to check its integrity?
-        frame_data, frame_number = self._stream.nextFrame()
-
-        if frame_data is None:
-            return
-
-        # Generate RTP packet
-        packet = RtpPacket()
-        packet.pt = 26
-        packet.seqnum = frame_number
-        packet.timestamp = int(time())
-        data = packet.encode(frame_data)
-
-        data_len = len(data)
-        if data_len == 0:
-            print("Empty data for some reason")
-            return
-
+    def _publish_rtp_frame(self, data_raw):
         destinations = self._get_rtp_destinations()
+
+        data_len = len(data_raw)
+
+        if data_len == 0:
+            return
 
         for address in destinations:
             try:
-                sent_len = self._sockets[0].sendto(data, address)
+                sent_len = self._sockets[0].sendto(data_raw, address)
                 if sent_len < 0:
                     print("System error in sendto %s" % address)
                 elif sent_len < data_len:
@@ -116,3 +96,21 @@ class RtpServer:
                 # TODO: Switch to NetInit state
                 print("OS Exception: %s" % str(e))
                 self.close_sockets()
+
+    def _restart_stream(self):
+        pass
+
+    # Publish frame to all clients
+    def _gen_rtp_frame(self):
+        if self.sockets_invalid():
+            self.init_sockets()
+
+        if self._stream is None or not isinstance(self._stream, RtpFrameGenerator):
+            raise Exception("RtpServer has invalid RTP Frame generator")
+
+        rtp_packet = self._stream.next_packet()
+        if rtp_packet is None:
+            raise Exception("RtpServer got invalid rtp packet")
+            self._restart_stream()
+
+        self._publish_rtp_frame(rtp_packet.raw_packet)
