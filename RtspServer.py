@@ -308,9 +308,14 @@ class RtspServer(TCPServer):
         url = request.url
 
         print("Initializing stream for %s" % url.path)
+
         if self._stream is None:
             # TODO: Make a proper stream pool
-            self._stream = VideoStream(url.path)
+            try:
+                self._stream = VideoStream(url.path)
+            except FileNotFoundError as e:
+                yield self.CmdRTSPResponse(self.FILE_NOT_FOUND_404, request.seq)
+                return
 
         sdp = self._stream.get_sdp(self.video_opt)
 

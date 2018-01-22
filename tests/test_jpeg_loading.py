@@ -19,6 +19,6 @@ print("Loaded %d bytes" % len(raw_data))
 
 image = JPEGFile()
 
-image.parse(raw_data)
+image.load_data(raw_data)
 
 print("Done")

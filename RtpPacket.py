@@ -54,8 +54,6 @@ class RtpPacket:
         """
         # Reusing existing header
         header = self._header_raw
-        #header = bytearray(self.HEADER_SIZE)
-        # header[0] = version + padding + extension + cc + seqnum + marker + pt + ssrc
         header[0] = self._version << 6
         header[0] |= self.padding << 5
         header[0] |= self.extension << 4
