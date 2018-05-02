@@ -38,7 +38,7 @@ live555 testRTSPClient (used in VLC):
 `./testProgs/testRTSPClient rtsp://localhost:1025/video.mjpeg`
 
 VLC:
-`vlc --verbose=1 --file-logging --logfile=vlc-log.txt blablabla`
+`vlc --verbose=1 --file-logging --logfile=vlc-log.txt rtsp://localhost:1025/video.mjpeg`
 
 	Start the client with the command line
 

@@ -84,6 +84,15 @@ class JpegFile:
         #return self._raw_image_data
         return self._image_data
 
+    def _add_raw_block(self, hdr_lo, hdr_hi, data):
+        """
+        Adds raw block to the storage
+        :param hdr_lo: lower byte of the header id
+        :param hdr_hi: upper byte of the header id
+        :param data: raw data
+        """
+        hdr = hdr_lo | (hdr_hi << 8)
+        self._raw_blocks.append((hdr, data))
 
     def write_chroma(self, out, offset):
         """
@@ -91,7 +100,7 @@ class JpegFile:
         :param out:bytearray output data
         :param offset:int offset to the table
         """
-        out[offset:offset + 64] = self.quantization_table[0]
+        out[offset:offset + 64] = self.quantization_table[0][0:64]
 
     def write_luma(self, out, offset):
         """
@@ -99,7 +108,7 @@ class JpegFile:
         :param out:bytearray output data
         :param offset:int offset to the table
         """
-        out[offset:offset + 64] = self.quantization_table[1]
+        out[offset:offset + 64] = self.quantization_table[1][0:64]
 
     def load_data(self, jpeg_bytes, offset=0, end=0):
         """
@@ -145,7 +154,7 @@ class JpegFile:
                 (head_lo, head_hi) = unpack_from('!BB', jpeg_bytes, end-2)
                 if head_lo != 0xff and head_hi != 0xd9:
                     print("Missing EOI block")
-                self._image_data = jpeg_bytes[offset:end]
+                self._image_data = jpeg_bytes[offset:end-2]
                 self._raw_image_data = jpeg_bytes[start:end]
                 print("Length of image data=%d bytes" % len(self._image_data))
                 return True
@@ -275,8 +284,11 @@ class JpegFile:
             print("Failed to find DQT header")
             return None
         print("Parsing Quantization block id=%x:%x len=%d table=%d" % (head_lo, head_hi, length, table_index))
-        offset += 4
-        qt = data[offset:offset+length]
+        offset += 5
+        qt = data[offset:offset+length-3]
+        if len(qt) != 64:
+            print("DQT table should be 64bytes. Got %d" % len(qt))
+            return None
         self.quantization_table[table_index] = qt
         self._found_quant += 1
         offset += length
@@ -492,7 +504,15 @@ class RtpJpegEncoder(RtpFrameGenerator):
                       self.jpeg_TypeSpecific,
                       hoffset, loffset, self.jpeg_Type, self.jpeg_Q,
                       (jpeg.width >> 3), (jpeg.height >> 3))
+
         output += header
+        offset += len(header)
+
+        if len(output) != offset:
+            raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
+
+        #print("#output=%d" % len(output))
+
         if jpeg.dri is not None:
             l = 1
             h = 1
@@ -503,6 +523,11 @@ class RtpJpegEncoder(RtpFrameGenerator):
             output += dri
             offset += 4
 
+        if len(output) != offset:
+            raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
+
+        #print("#output=%d" % len(output))
+
         if self.jpeg_Q > 127 and jpeg_offset == 0:
             # Write table
             # Write luma x64
@@ -512,12 +537,24 @@ class RtpJpegEncoder(RtpFrameGenerator):
             pack_into('!BBH', qt, 0, self.jpeg_QT_MBZ, self.jpeg_QT_Precision, qt_length)
             jpeg.write_luma(qt, 4)
             jpeg.write_chroma(qt, 68)
+            #print("#output=%d" % len(output))
+            #print("#qt=%d" % len(qt))
             output += qt
+            #print("#output=%d" % len(output))
             offset += 132
 
-        output += jpeg.image_data[jpeg_offset:jpeg_offset+frame_length]
+        #print("#output=%d" % len(output))
 
-        jpeg_offset += frame_length
+        if len(output) != offset:
+            raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
+        # TODO: Should crimp it
+        max_jpeg_len = len(jpeg.image_data)
+        next_jpeg_pos = min(max_jpeg_len, jpeg_offset+(frame_length-offset))
+        output += jpeg.image_data[jpeg_offset:next_jpeg_pos]
+
+        #print("Sending packet hlen=%d dlen=%d total=%d" % (offset, (next_jpeg_pos-jpeg_offset), len(output)))
+
+        jpeg_offset = next_jpeg_pos
         return output, jpeg_offset
 
     # Encode to RTP payload stream
@@ -552,7 +589,8 @@ class RtpJpegEncoder(RtpFrameGenerator):
             packet.timestamp = self.get_timestamp_90khz(timestamp)
 
             frame_length = min(max_datagram_size, total_length-jpeg_offset)
-            data, jpeg_offset = self.make_rtp_frame_payload(jpeg, jpeg_offset, frame_length)
+            #data, jpeg_offset = self.make_rtp_frame_payload(jpeg, jpeg_offset, frame_length)
+            data, jpeg_offset = self.make_rtp_frame_payload(jpeg, jpeg_offset, max_datagram_size)
             done = jpeg_offset >= total_length
 
             #if first:
