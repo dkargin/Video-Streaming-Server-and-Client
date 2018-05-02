@@ -1,5 +1,5 @@
+# Uses avcodec to generate test video stream
 from __future__ import division
-
 import numpy as np
 import av
 

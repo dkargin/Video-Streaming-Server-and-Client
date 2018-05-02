@@ -12,7 +12,7 @@ def main():
         rtpPort = sys.argv[3]
         fileName = sys.argv[4]
     except:
-        print("[Usage: ClientLauncher.py Server_name Server_port RTP_port Video_file]\n")
+        print("[Usage: client_main.py Server_name Server_port RTP_port Video_file]\n")
         return
 
     root = Tk()

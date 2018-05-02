@@ -1,7 +1,6 @@
 from tornado.ioloop import PeriodicCallback
 from RtpFrameGenerator import RtpPacket, RtpFrameGenerator
 import socket
-from time import time
 
 
 class RtpServer:
@@ -101,7 +100,7 @@ class RtpServer:
     def _restart_stream(self):
         pass
 
-    # Publish frame to all clients
+    # Publish RTP frame to all clients
     def _gen_rtp_frame(self):
         if self.sockets_invalid():
             self.init_sockets()

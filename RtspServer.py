@@ -219,6 +219,14 @@ class RtspServer(TCPServer):
     def _get_client(self, address):
         return self.clients.get("%s:%d" % address)
 
+    def _remove_client(self, address):
+        """
+        Removes client from RTP publish list
+        :param address: address tuple  of a client
+        """
+        if address in self.clients:
+            self.clients.pop(address)
+
     @staticmethod
     def run():
         IOLoop.current().start()
@@ -243,15 +251,14 @@ class RtspServer(TCPServer):
                 self._remove_client(address)
                 break
 
-    def _remove_client(self, address):
-        """
-        Removes client from RTP publish list
-        :param address: address tuple  of a client
-        """
-        if address in self.clients:
-            self.clients.pop(address)
-
     def _handle_raw_request(self, stream, request_raw, address):
+        """
+        Handles raw http request
+        :param stream: stream from tornado
+        :param request_raw: raw request packet
+        :param address: address of requesint side
+        :return:
+        """
         responses = 0
 
         # Gather commands from RTSP protocol processor
@@ -259,6 +266,8 @@ class RtspServer(TCPServer):
 
         out = None
 
+        # Spin our FSM
+        # We should get at least one response, and some other internal commands
         while True:
             try:
                 if out is None:

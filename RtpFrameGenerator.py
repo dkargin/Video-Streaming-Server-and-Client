@@ -1,5 +1,4 @@
 """
-
 References:
 
 - RTP Payload Format for JPEG-compressed Video
@@ -43,7 +42,7 @@ class RtpPacket:
 
     # Calculate size for current header
     def calc_header_size(self):
-        return self.HEADER_SIZE if self.extension==0 else self.HEADER_SIZE + 4
+        return self.HEADER_SIZE if self.extension == 0 else self.HEADER_SIZE + 4
 
     def encode_header(self, data_raw, offset=0):
         """

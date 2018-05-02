@@ -16,6 +16,11 @@ Used as a reference RTP-MJPEG packetiser
 """
 
 
+class HuffmanTable:
+    def __init__(self):
+        self.codes = []
+        self.symbols = []
+
 class JpegFile:
     """
     Parser for JPEG file
@@ -25,19 +30,32 @@ class JpegFile:
         self.height = 0
         self.type = 0
         self.dri = None
+
+        # Raw blocks, in order that parser found them
+        # It contains pairs of type (block_id, block_data)
+        self._raw_blocks = []
         # bytearray with scanlines from jpeg file
         self._image_data = None
+        # Cached raw image data, with all blocks
+        self._raw_image_data = None
+        # Thumbnail stuff
+        self._has_thumbnail = False
+        self._thumb_width = 0
+        self._thumb_height = 0
         # End marker for parser
         self._done = False
 
         # Quantization tables, lqt, cqt
         self.quantization_table = {}
+        # Huffman tables,
+        self.huffman_tables = {}
         self._error = 0
         self._found_quant = 0
         self._found_soi = 0
         self._found_sof = 0
         self._found_sofn = 0
         self._found_dqt = 0
+        self._found_dht = 0
         self._found_jfif = 0
         self._found_data = False
 
@@ -46,36 +64,40 @@ class JpegFile:
         self._error = 0
         self.width = 0
         self.height = 0
+        self._raw_image_data = None
         self.quantization_table = {}
-
+        self.huffman_tables = {}
+        self._raw_blocks = []
+        self._has_thumbnail = False
         self._done = False
         self._found_quant = 0
         self._found_soi = 0
         self._found_sof = 0
         self._found_sofn = 0
         self._found_dqt = 0
+        self._found_dht = 0
         self._found_jfif = 0
         self._found_data = False
 
     @property
     def image_data(self):
+        #return self._raw_image_data
         return self._image_data
+
 
     def write_chroma(self, out, offset):
         """
         Writes jpeg chroma table to a specified location of a bytearray
         :param out:bytearray output data
         :param offset:int offset to the table
-        :return:
         """
         out[offset:offset + 64] = self.quantization_table[0]
 
     def write_luma(self, out, offset):
         """
-        Writes jpeg chroma table to a specified location of a bytearray
+        Writes jpeg luminance table to a specified location of a bytearray
         :param out:bytearray output data
         :param offset:int offset to the table
-        :return:
         """
         out[offset:offset + 64] = self.quantization_table[1]
 
@@ -87,6 +109,9 @@ class JpegFile:
         :param end:int byte offset to an end of data block
         :return:
         """
+
+        start = offset
+
         if end == 0:
             end = len(jpeg_bytes)
 
@@ -112,9 +137,18 @@ class JpegFile:
                 offset += (length+2)
 
         if self._found_data:
-            self._image_data = jpeg_bytes[offset:end]
-            print("Length of image data=%d bytes" % len(self._image_data))
-            return True
+            if offset + 2 >= end:
+                print("Data is too short: %d bytes" % (end - offset))
+                return False
+            else:
+                # Try end of data block
+                (head_lo, head_hi) = unpack_from('!BB', jpeg_bytes, end-2)
+                if head_lo != 0xff and head_hi != 0xd9:
+                    print("Missing EOI block")
+                self._image_data = jpeg_bytes[offset:end]
+                self._raw_image_data = jpeg_bytes[start:end]
+                print("Length of image data=%d bytes" % len(self._image_data))
+                return True
         return False
 
     def _parse_jfif(self, data, offset):
@@ -136,6 +170,11 @@ class JpegFile:
         pos += 6
         if 2 + length - pos > 0:
             thumb_data = 3*width*height
+
+        if xtumb > 0 or ytumb > 0:
+            print("Expecting thumbnail %dx%d" % (xtumb, ytumb))
+            self._thumb_height = ytumb
+            self._thumb_width = xtumb
 
         self._found_jfif += 1
         return length+2
@@ -199,6 +238,29 @@ class JpegFile:
             print("Parsed DRI block id=%x:%x len=%d" % (app_l, app_h, length))
         return length + 2
 
+    def _parse_huffman_table(self, data, offset):
+        # We skip this block
+        (app_l, app_h, length, table_flags) = unpack_from("!BBHB", data, offset)
+        if (app_l != 0xff or app_h != 0xc4 or length < 16):
+            print("Wrong DHT block id=%x:%x len=%d" % (app_l, app_h, length))
+            #print("Skipping huffman block id=%x:%x len=%d" % (app_l, app_h, length))
+
+        table_index = table_flags & 0b111
+        is_dc = (table_flags & 0b0001000) == 0
+        # Obtaining table header
+        #header = data[offset+5: offset+21]
+        header = unpack_from("!BBBBBBBBBBBBBBBB", data, offset + 5)
+
+        total_len = 0
+        for len in header:
+            total_len += len
+        if is_dc:
+            print("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
+        else:
+            print("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
+        self._found_dht += 1
+        return length + 2
+
     def _parse_start_of_frame_n(self, data, offset):
         # We skip this block
         (app_l, app_h, length) = unpack_from("!BBH", data, offset)
@@ -220,8 +282,9 @@ class JpegFile:
         offset += length
         return 2+length
 
-    def _parse_sof(self, data, offset):
+    def _parse_sos(self, data, offset):
         """
+        Parses Start of Scan block
         Marker Identifier             2 bytes      0xff, 0xda identify SOS marker
         Length                        2 bytes      This must be equal to 6+2*(number of components in scan).
         Number of Components in scan  1 byte       This must be >= 1 and <=4 (otherwise error), usually 1 or 3
@@ -233,16 +296,23 @@ class JpegFile:
         Ignorable Bytes               3 bytes      We have to skip 3 bytes.
         """
         (head_lo, head_hi, length, num_components) = unpack_from('!BBHB', data, offset)
-        print("Parsing Start Of Scan id=%x:%x len=%d" % (head_lo, head_hi, length))
+
 
         if num_components not in range(1, 4):
             print("\t %d - strange number of components" % num_components)
         pos = 5
         for c in range(0, num_components):
-            (id, table_flags) = unpack_from('!BB', data, offset+pos)
+            (comp_id, table_flags) = unpack_from('!BB', data, offset+pos)
+            comp_name = component_map.get(comp_id, 'N')
+            ac_table = table_flags & 0b1111
+            dc_table = (table_flags >> 4) & 0b1111
+            print("\t- component %s uses Huffman AC table %d DC table %d" % (comp_name, ac_table, dc_table))
             pos += 2
 
+        (scan_start, scan_end, bit_pos) = unpack_from('!BBB', data, offset+pos)
         pos += 3
+
+        print("Parsing Start Of Scan id=%x:%x len=%d, start=%d, end=%d" % (head_lo, head_hi, length, scan_start, scan_end))
 
         self._found_data = True
         self._done = True
@@ -270,7 +340,7 @@ class JpegFile:
         0xffc1: _parse_start_of_frames,
         0xffc2: _parse_start_of_frames,
         0xffc3: _parse_start_of_frame_n,
-        0xffc4: _parse_start_of_frame_n,
+        0xffc4: _parse_huffman_table,
         0xffc5: _parse_start_of_frame_n,
         0xffc6: _parse_start_of_frame_n,
         0xffc7: _parse_start_of_frame_n,
@@ -280,7 +350,7 @@ class JpegFile:
         0xffcd: _parse_start_of_frame_n,
         0xffce: _parse_start_of_frame_n,
         0xffcf: _parse_start_of_frame_n,
-        HEADER_SOS: _parse_sof,
+        HEADER_SOS: _parse_sos,
         HEADER_QUANT: _parse_quant_block,
         HEADER_EOI: _parse_end_of_image,
     }
