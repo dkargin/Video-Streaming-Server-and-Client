@@ -11,6 +11,10 @@ parser.add_argument('file', metavar='N', help='jpeg file to load')
 
 args = parser.parse_args()
 
+import logging
+import sys
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
 print("Opening file %s" % args.file)
 
 file = open(args.file, 'rb')

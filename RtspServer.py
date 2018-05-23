@@ -198,8 +198,12 @@ class RtspServer(TCPServer):
             self.client = client
 
     def __init__(self, port, stream_factory):
+        """
+        Creates RTP server instance
+        :param port:int primary port for RTSP server
+        :param stream_factory:function(url) generator for RTP packet provider
+        """
         super(RtspServer, self).__init__()
-
         # Maps address->client
         self.clients = {}
         self.video_opt = {'video_port': 8400}

@@ -2,6 +2,9 @@ from struct import pack_into, unpack_from, pack, pack_into
 from sdp_utils import make_sdp2
 from RtpFrameGenerator import RtpPacket, RtpFrameGenerator
 from time import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 component_map = {1: 'Y', 2: 'Cb', 3: 'Cr', 4: 'I', 5: 'Q'}
 
@@ -12,7 +15,7 @@ http://vip.sugovica.hu/Sardi/kepnezo/JPEG%20File%20Layout%20and%20Format.htm
 Used for making JPEG parser
 
 https://tools.ietf.org/html/rfc2435
-Used as a reference RTP-MJPEG packetiser
+Used as a reference RTP-MJPEG packetizer
 """
 
 
@@ -21,9 +24,10 @@ class HuffmanTable:
         self.codes = []
         self.symbols = []
 
+
 class JpegFile:
     """
-    Parser for JPEG file
+    Dissector for JPEG file
     """
     def __init__(self):
         self.width = 0
@@ -97,7 +101,7 @@ class JpegFile:
     def write_chroma(self, out, offset):
         """
         Writes jpeg chroma table to a specified location of a bytearray
-        :param out:bytearray output data
+        :param out:bytes output data
         :param offset:int offset to the table
         """
         out[offset:offset + 64] = self.quantization_table[0][0:64]
@@ -105,7 +109,7 @@ class JpegFile:
     def write_luma(self, out, offset):
         """
         Writes jpeg luminance table to a specified location of a bytearray
-        :param out:bytearray output data
+        :param out:bytes output data
         :param offset:int offset to the table
         """
         out[offset:offset + 64] = self.quantization_table[1][0:64]
@@ -127,13 +131,13 @@ class JpegFile:
         self.reset()
 
         if jpeg_bytes[offset+0] != 0xff or jpeg_bytes[offset+1] != 0xd8:
-            print("No SOI header at start")
+            logger.error("No SOI header at start")
             return False
 
         self._done = False
 
         while offset+4 < end and not self._done:
-            temp_data = jpeg_bytes[offset:]          # Debug data view
+            temp_data = jpeg_bytes[offset:]          # Debug view of the data
             (head_lo, head_hi) = unpack_from('!BB', jpeg_bytes, offset)
             head = (head_lo << 8) | head_hi
 
@@ -142,37 +146,39 @@ class JpegFile:
                 offset += handler(self, jpeg_bytes, offset)
             else:
                 length = unpack_from("!H", jpeg_bytes, offset + 2)[0]
-                print("Unknown block %x:%x len=%d" % (head_lo, head_hi, length))
-                offset += (length+2)
+                logger.warn("Unknown block %x:%x len=%d at offset=%d" % (head_lo, head_hi, length, offset))
+                next_block = temp_data[length:]
+                offset += length
 
         if self._found_data:
             if offset + 2 >= end:
-                print("Data is too short: %d bytes" % (end - offset))
+                logger.error("Data is too short: %d bytes" % (end - offset))
                 return False
             else:
                 # Try end of data block
                 (head_lo, head_hi) = unpack_from('!BB', jpeg_bytes, end-2)
                 if head_lo != 0xff and head_hi != 0xd9:
-                    print("Missing EOI block")
+                    logger.error("Missing EOI block")
                 self._image_data = jpeg_bytes[offset:end-2]
                 self._raw_image_data = jpeg_bytes[start:end]
-                print("Length of image data=%d bytes" % len(self._image_data))
+                logger.debug("Length of image data=%d bytes" % len(self._image_data))
                 return True
         return False
 
     def _parse_jfif(self, data, offset):
         pos = 0
         (app_l, app_h, length) = unpack_from("!BBH", data, offset)
-        print("Parsing JFIF block id=%x:%x len=%d" % (app_l, app_h, length))
+        logger.debug("Parsing JFIF block id=%x:%x len=%d" % (app_l, app_h, length))
         if app_l != 0xff and app_h != 0xe0:
-            print("Wrong APP0 header %x:%x" % (app_l, app_h))
+            logger.error("Wrong APP0 header %x:%x" % (app_l, app_h))
+            return length+2
         pos += 4
         id = unpack_from("!5c", data, offset+pos)
         # Should be 'JFIF'#0 (0x4a, 0x46, 0x49, 0x46, 0x00)
         pos += 5
         (version_major, version_minor, units) = unpack_from("!BBB", data, offset+pos)
         if version_major != 1:
-            print("Strange JFIF version %d.%d" % (version_major, version_minor))
+            logger.warn("Strange JFIF version %d.%d" % (version_major, version_minor))
         pos += 3
 
         (width, height, xtumb, ytumb) = unpack_from("!hhbb", data, offset+pos)
@@ -181,7 +187,7 @@ class JpegFile:
             thumb_data = 3*width*height
 
         if xtumb > 0 or ytumb > 0:
-            print("Expecting thumbnail %dx%d" % (xtumb, ytumb))
+            logger.debug("Expecting thumbnail %dx%d" % (xtumb, ytumb))
             self._thumb_height = ytumb
             self._thumb_width = xtumb
 
@@ -190,9 +196,17 @@ class JpegFile:
 
     def _parse_start_of_image(self, data, offset):
         (app_l, app_h) = unpack_from("!BB", data, offset)
-        print("Parsing SOI block id=%x:%x" % (app_l, app_h))
+        logger.debug("Parsing SOI block id=%x:%x" % (app_l, app_h))
         self._found_soi += 1
         return 2
+
+    def _parse_comment(self, data, offset):
+        (app_l, app_h, length) = unpack_from("!BBH", data, offset)
+        if app_l != 0xff or app_h != 0xfe:
+            logger.debug("Not a comment block id=%x:%x" % (app_l, app_h))
+        else:
+            logger.debug("Found comment block id=%x:%x" % (app_l, app_h))
+        return length+2
 
     def _parse_start_of_frames(self, data, offset):
         """
@@ -213,19 +227,26 @@ class JpegFile:
         """
         (app_l, app_h, length) = unpack_from("!BBH", data, offset)
         if app_l == 0xff and app_h in range(0xc0, 0xcf):
-            print("Parsing SOF block id=%x:%x len=%d" % (app_l, app_h, length))
+            logger.debug("Parsing SOF block id=%x:%x len=%d" % (app_l, app_h, length))
         else:
-            print("Block mismatch")
+            logger.error("Block mismatch")
             return None
         pos = 4
         (precision, self.height, self.width, num_components) = unpack_from("!BHHB", data, offset+pos)
         pos += 6
-        print("\t - image size %dx%d" % (self.width, self.height))
+        logger.debug("\t - image size %dx%d" % (self.width, self.height))
         self._found_sof += 1
 
         for i in range(0, num_components):
             (comp_id, comp_sampling, quant_table) = unpack_from("!3B", data, offset+pos)
-            print("\t -component %s samp=%d, qt=%d" % (component_map.get(comp_id, 'N'), comp_sampling, quant_table))
+            logger.debug("\t -component %s samp=%d, qt=%d" % (component_map.get(comp_id, 'N'), comp_sampling, quant_table))
+            if i == 0:
+                if comp_sampling == 0x11:
+                    self.type = 0
+                elif comp_sampling == 0x22:
+                    self.type = 1
+                else:
+                    logger.error("\twrong sampling factor %d for Y component!"%comp_sampling)
             pos += 3
 
         return length+2
@@ -244,15 +265,14 @@ class JpegFile:
         """
         (app_l, app_h, length, self.dri) = unpack_from("!BBH", data, offset)
         if app_l == 0xff and app_h == 0xdd:
-            print("Parsed DRI block id=%x:%x len=%d" % (app_l, app_h, length))
+            logger.debug("Parsed DRI block id=%x:%x len=%d" % (app_l, app_h, length))
         return length + 2
 
     def _parse_huffman_table(self, data, offset):
         # We skip this block
         (app_l, app_h, length, table_flags) = unpack_from("!BBHB", data, offset)
-        if (app_l != 0xff or app_h != 0xc4 or length < 16):
-            print("Wrong DHT block id=%x:%x len=%d" % (app_l, app_h, length))
-            #print("Skipping huffman block id=%x:%x len=%d" % (app_l, app_h, length))
+        if app_l != 0xff or app_h != 0xc4 or length < 16:
+            logger.error("Wrong DHT block id=%x:%x len=%d" % (app_l, app_h, length))
 
         table_index = table_flags & 0b111
         is_dc = (table_flags & 0b0001000) == 0
@@ -264,9 +284,9 @@ class JpegFile:
         for len in header:
             total_len += len
         if is_dc:
-            print("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
+            logger.debug("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
         else:
-            print("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
+            logger.debug("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
         self._found_dht += 1
         return length + 2
 
@@ -274,20 +294,20 @@ class JpegFile:
         # We skip this block
         (app_l, app_h, length) = unpack_from("!BBH", data, offset)
         if app_l == 0xff and app_h in range(0xc0, 0xcf):
-            print("Skipping SOFn block id=%x:%x len=%d" % (app_l, app_h, length))
+            logger.error("Skipping SOFn block id=%x:%x len=%d" % (app_l, app_h, length))
             self._found_sofn += 1
         return length+2
 
     def _parse_quant_block(self, data, offset):
         (head_lo, head_hi, length, table_index) = unpack_from('!BBHB', data, offset)
         if head_lo != 0xff and head_hi != 0xdb:
-            print("Failed to find DQT header")
+            logger.error("Failed to find DQT header")
             return None
-        print("Parsing Quantization block id=%x:%x len=%d table=%d" % (head_lo, head_hi, length, table_index))
+        logger.info("Parsing Quantization block id=%x:%x len=%d table=%d" % (head_lo, head_hi, length, table_index))
         offset += 5
         qt = data[offset:offset+length-3]
         if len(qt) != 64:
-            print("DQT table should be 64bytes. Got %d" % len(qt))
+            logger.error("DQT table should be 64bytes. Got %d" % len(qt))
             return None
         self.quantization_table[table_index] = qt
         self._found_quant += 1
@@ -309,22 +329,21 @@ class JpegFile:
         """
         (head_lo, head_hi, length, num_components) = unpack_from('!BBHB', data, offset)
 
-
         if num_components not in range(1, 4):
-            print("\t %d - strange number of components" % num_components)
+            logger.warn("\t %d - strange number of components" % num_components)
         pos = 5
         for c in range(0, num_components):
             (comp_id, table_flags) = unpack_from('!BB', data, offset+pos)
             comp_name = component_map.get(comp_id, 'N')
             ac_table = table_flags & 0b1111
             dc_table = (table_flags >> 4) & 0b1111
-            print("\t- component %s uses Huffman AC table %d DC table %d" % (comp_name, ac_table, dc_table))
+            logger.debug("\t- component %s uses Huffman AC table %d DC table %d" % (comp_name, ac_table, dc_table))
             pos += 2
 
         (scan_start, scan_end, bit_pos) = unpack_from('!BBB', data, offset+pos)
         pos += 3
 
-        print("Parsing Start Of Scan id=%x:%x len=%d, start=%d, end=%d" % (head_lo, head_hi, length, scan_start, scan_end))
+        logger.debug("Parsing Start Of Scan id=%x:%x len=%d, start=%d, end=%d" % (head_lo, head_hi, length, scan_start, scan_end))
 
         self._found_data = True
         self._done = True
@@ -332,7 +351,7 @@ class JpegFile:
         return length + 2
 
     def _parse_end_of_image(self, data, offset):
-        print("Parsing End Of Image")
+        logger.debug("Parsing End Of Image")
         (head_lo, head_hi, length) = unpack_from('!BBH', data, offset)
         self._done = True
         return length + 2
@@ -365,6 +384,7 @@ class JpegFile:
         HEADER_SOS: _parse_sos,
         HEADER_QUANT: _parse_quant_block,
         HEADER_EOI: _parse_end_of_image,
+        0xfffe: _parse_comment
     }
 
 RTP_JPEG_RESTART = 0x40
@@ -380,8 +400,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
     def __init__(self):
         super(RtpJpegEncoder, self).__init__()
         self.jpeg_TypeSpecific = 0
-        self.jpeg_Type = 0
-        self.jpeg_Q = 128
+        self.jpeg_Q = 255
         self.jpeg_QT_MBZ = 0
         self.jpeg_QT_Precision = 0
         self.seq = 0
@@ -417,7 +436,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
         :param jpeg:JpegFile
         :param jpeg_offset:int
         :param frame_length:int
-        :return:bytearray rtp mjpeg payload
+        :return:bytes RTP mjpeg payload
         """
         """
         // Initialize JPEG header. OK
@@ -442,8 +461,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
             rsthdr.count = 0x3fff;
         }
 
-        /* Initialize quantization table header
-         */
+        /* Initialize quantization table header */
         if (q >= 128) {
             qtblhdr.mbz = 0;
             qtblhdr.precision = 0; /* This code uses 8 bit tables only */
@@ -497,21 +515,21 @@ class RtpJpegEncoder(RtpFrameGenerator):
         loffset = jpeg_offset & 0xffff
 
         if jpeg.width % 8 != 0 or jpeg.height % 8 != 0:
-            print("Jpeg image size should be divisible by 8: %dx%d"%(jpeg.width, jpeg.height))
+            logger.error("Jpeg image size should be divisible by 8: %dx%d"%(jpeg.width, jpeg.height))
 
         output = bytearray()
+        width_packed = jpeg.width >> 3
+        height_packed = jpeg.height >> 3
         header = pack('!BBHBBBB',
                       self.jpeg_TypeSpecific,
-                      hoffset, loffset, self.jpeg_Type, self.jpeg_Q,
-                      (jpeg.width >> 3), (jpeg.height >> 3))
+                      hoffset, loffset, jpeg.type, self.jpeg_Q,
+                      width_packed, height_packed)
 
         output += header
         offset += len(header)
 
         if len(output) != offset:
             raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
-
-        #print("#output=%d" % len(output))
 
         if jpeg.dri is not None:
             l = 1
@@ -526,8 +544,6 @@ class RtpJpegEncoder(RtpFrameGenerator):
         if len(output) != offset:
             raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
 
-        #print("#output=%d" % len(output))
-
         if self.jpeg_Q > 127 and jpeg_offset == 0:
             # Write table
             # Write luma x64
@@ -537,13 +553,8 @@ class RtpJpegEncoder(RtpFrameGenerator):
             pack_into('!BBH', qt, 0, self.jpeg_QT_MBZ, self.jpeg_QT_Precision, qt_length)
             jpeg.write_luma(qt, 4)
             jpeg.write_chroma(qt, 68)
-            #print("#output=%d" % len(output))
-            #print("#qt=%d" % len(qt))
             output += qt
-            #print("#output=%d" % len(output))
             offset += 132
-
-        #print("#output=%d" % len(output))
 
         if len(output) != offset:
             raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
@@ -551,8 +562,6 @@ class RtpJpegEncoder(RtpFrameGenerator):
         max_jpeg_len = len(jpeg.image_data)
         next_jpeg_pos = min(max_jpeg_len, jpeg_offset+(frame_length-offset))
         output += jpeg.image_data[jpeg_offset:next_jpeg_pos]
-
-        #print("Sending packet hlen=%d dlen=%d total=%d" % (offset, (next_jpeg_pos-jpeg_offset), len(output)))
 
         jpeg_offset = next_jpeg_pos
         return output, jpeg_offset
@@ -645,8 +654,8 @@ class RtpJpegFileStream(RtpJpegEncoder):
         file.close()
 
         if raw_data is None:
-            print("Cannot read the file %s")
-        #print("Loaded %d bytes" % len(raw_data))
+            raise IOError("Failed to open the file %s" % self._path)
+        #logger.debug("Loaded %d bytes" % len(raw_data))
         self._jpeg.load_data(raw_data)
         timestamp = time()
         self._frames = self.encode_rtp(timestamp, self._jpeg, self._packet_size)
