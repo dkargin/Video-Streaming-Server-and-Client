@@ -74,7 +74,7 @@ class RtpServer:
         self._sockets = None
 
     def sockets_invalid(self):
-        return self._sockets is not None
+        return self._sockets is None
 
     def _publish_rtp_frame(self, rtp_packet):
         destinations = self._get_rtp_destinations()
@@ -83,6 +83,9 @@ class RtpServer:
         data_len = len(data_raw)
 
         if data_len == 0:
+            return
+
+        if self._sockets is None or len(self._sockets) == 0:
             return
 
         for address in destinations:

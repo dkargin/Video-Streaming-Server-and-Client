@@ -48,3 +48,7 @@ VLC:
 References:
 
 http://imrannazar.com/Let%27s-Build-a-JPEG-Decoder:-Huffman-Tables
+
+Jpeg decoder/encoder using pure python:
+
+ - https://github.com/ghallak/jpeg-python

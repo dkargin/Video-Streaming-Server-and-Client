@@ -231,6 +231,9 @@ class JpegFile:
         else:
             logger.error("Block mismatch")
             return None
+
+        if app_h == 0xc2:
+            logger.warn("This is progressive encoding!")
         pos = 4
         (precision, self.height, self.width, num_components) = unpack_from("!BHHB", data, offset+pos)
         pos += 6
@@ -269,24 +272,39 @@ class JpegFile:
         return length + 2
 
     def _parse_huffman_table(self, data, offset):
-        # We skip this block
+        """
+        Parsing Huffman table
+        :param data:
+        :param offset:
+        :return:int number of bytes parsed
+
+        HT block structure:
+            int16 bid
+            int16 length
+            int8 flags
+            int8[16] ht_header
+            int8[] table_data
+        """
         (app_l, app_h, length, table_flags) = unpack_from("!BBHB", data, offset)
         if app_l != 0xff or app_h != 0xc4 or length < 16:
             logger.error("Wrong DHT block id=%x:%x len=%d" % (app_l, app_h, length))
 
         table_index = table_flags & 0b111
         is_dc = (table_flags & 0b0001000) == 0
-        # Obtaining table header
-        #header = data[offset+5: offset+21]
+
+        # Obtaining header of the table
         header = unpack_from("!BBBBBBBBBBBBBBBB", data, offset + 5)
 
         total_len = 0
-        for len in header:
-            total_len += len
+        for l in header:
+            total_len += l
+
         if is_dc:
-            logger.debug("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
+            logger.debug("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" %
+                         (app_l, app_h, length, table_index, header, total_len))
         else:
-            logger.debug("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" % (app_l, app_h, length, table_index, header, total_len))
+            logger.debug("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" %
+                         (app_l, app_h, length, table_index, header, total_len))
         self._found_dht += 1
         return length + 2
 
