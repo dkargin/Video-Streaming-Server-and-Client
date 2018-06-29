@@ -7,7 +7,7 @@ File is determined by requested URL
 """
 
 from RtspServer import RtspServer
-from JpegStream import RtpJpegFileStream
+from JpegRtpStillStream import RtpJpegFileStream
 
 
 def main():

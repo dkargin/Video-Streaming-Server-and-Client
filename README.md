@@ -51,4 +51,5 @@ http://imrannazar.com/Let%27s-Build-a-JPEG-Decoder:-Huffman-Tables
 
 Jpeg decoder/encoder using pure python:
 
- - https://github.com/ghallak/jpeg-python
+ - https://github.com/ghallak/jpeg-python looks and works very strange. Decoder can not properly read any jpeg. There are no proper block parsing for some reason
+ - https://github.com/yohhoy/picojdec really tiny. But it does not work as well. It stops parsing stuff after SOI block
