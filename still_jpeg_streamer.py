@@ -1,5 +1,5 @@
 import argparse
-
+import logging
 """
 This example streams still jpeg frames
 
@@ -20,11 +20,9 @@ def main():
     # Test stream factory. Creates JpegStream for any url
     def stream_factory(path):
         """
-
         :param path: path to be opened. Extracted from URL and starts with '/'
         :return: Created stream or None
         """
-        #file = 'wide_shit.jpg'
         file = args.src + path
         try:
             return RtpJpegFileStream(file)
@@ -32,6 +30,13 @@ def main():
             raise
             # File not found? Should 404 back
             return None
+
+    # format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+    # set up logging to file - see previous section for more details
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(message)s',
+                        datefmt='%m-%d %H:%M')
+    # define a Handler which writes INFO messages or hi
 
     server = RtspServer(args.port, stream_factory)
     print("Will stream to rtsp://%s:%d/"%(args.address, args.port))

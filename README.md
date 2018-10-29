@@ -37,7 +37,7 @@ ffmpeg:
 live555 testRTSPClient (used in VLC):
 `./testProgs/testRTSPClient rtsp://localhost:1025/video.mjpeg`
 
-You can save jpeg images and use test jpeg loader to analyse what happened with data aftre being streamed
+You can save jpeg images and use test jpeg loader to analyse what happened with data after being streamed
 
 `../openRTSP -m rtsp://localhost:1025/wide_shit.jpg`
 It should save reassembled JPEG frames back to a file

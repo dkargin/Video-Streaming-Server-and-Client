@@ -1,10 +1,7 @@
 from struct import pack_into, unpack_from, pack, pack_into, calcsize
 from io import BytesIO
-#from __future__ import division
 from array import array
 from copy import copy
-
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,7 +17,6 @@ Used for making JPEG parser
 https://tools.ietf.org/html/rfc2435
 Used as a reference RTP-MJPEG packetizer
 """
-
 
 def clamp(x):
     """
@@ -293,22 +289,22 @@ def _forward_dct(block):
         block[i+40] = (tmp2 + tmp11 + tmp12) >> 15
         block[i+56] = (tmp3 + tmp10 + tmp13) >> 15
 
-
-_z_z = bytearray([ # Zig-zag indices of AC coefficients
+# Zig-zag indices of AC coefficients
+_z_z = bytearray([
          1,  8, 16,  9,  2,  3, 10, 17, 24, 32, 25, 18, 11,  4,  5,
     12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13,  6,  7, 14, 21, 28,
     35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
     58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63])
 
-
-_luminance_quantization = bytearray([ # Luminance quantization table in zig-zag order
+# Luminance quantization table in zig-zag order
+_luminance_quantization = bytearray([
     16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 40,
     26, 24, 22, 22, 24, 49, 35, 37, 29, 40, 58, 51, 61, 60, 57, 51,
     56, 55, 64, 72, 92, 78, 64, 68, 87, 69, 55, 56, 80,109, 81, 87,
     95, 98,103,104,103, 62, 77,113,121,112,100,120, 92,101,103, 99])
 
-
-_chrominance_quantization = bytearray([ # Chrominance quantization table in zig-zag order
+# Chrominance quantization table in zig-zag order
+_chrominance_quantization = bytearray([
     17, 18, 18, 24, 21, 24, 47, 26, 26, 47, 99, 66, 56, 66, 99, 99,
     99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
     99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
@@ -316,16 +312,16 @@ _chrominance_quantization = bytearray([ # Chrominance quantization table in zig-
 
 # These are standard tables, used for MJPEG streaming
 
-# Luminance DC code lengths
-_lum_dc_codelens = bytearray([0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+# Standard MJPEG Luminance DC code lengths
+_lum_dc_code_length = bytearray([0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
 
-# Luminance DC values
+# Standard MJPEG Luminance DC values
 _lum_dc_symbols = bytearray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
-# Luminance AC code lengths
-_lum_ac_codelens = bytearray([0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125])
+# Standard MJPEG Luminance AC code lengths
+_lum_ac_code_length = bytearray([0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125])
 
-# Luminance AC values
+# Standard MJPEG Luminance AC values
 _lum_ac_symbols = bytearray([
       1,  2,  3,  0,  4, 17,  5, 18, 33, 49, 65,  6, 19, 81, 97,  7, 34,113,
      20, 50,129,145,161,  8, 35, 66,177,193, 21, 82,209,240, 36, 51, 98,114,
@@ -337,13 +333,13 @@ _lum_ac_symbols = bytearray([
     196,197,198,199,200,201,202,210,211,212,213,214,215,216,217,218,225,226,
     227,228,229,230,231,232,233,234,241,242,243,244,245,246,247,248,249,250])
 
-# Chrominance DC code lengths
+# Standard MJPEG Chrominance DC code lengths
 _chm_dc_codelens = bytearray([0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0])
 
-# Chrominance DC values
+# Standard MJPEG Chrominance DC values
 _chm_dc_symbols = bytearray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
-# Chrominance AC code lengths
+# Standard MJPEG Chrominance AC code lengths
 _ca_lengths = bytearray([ 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119])
 
 """
@@ -354,7 +350,7 @@ u_char chm_dc_symbols[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, };
 u_char chm_ac_codelens[] = { 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77, };
 """
 
-# Chrominance AC values
+# Standard MJPEG Chrominance AC values
 _ca_values = bytearray([
       0,  1,  2,  3, 17,  4,  5, 33, 49,  6, 18, 65, 81,  7, 97,113, 19, 34,
      50,129,  8, 20, 66,145,161,177,193,  9, 35, 51, 82,240, 21, 98,114,209,
@@ -727,7 +723,11 @@ class JpegFile:
 
             handler = self.block_parsers.get(head)
             if handler:
-                offset += handler(self, jpeg_bytes, offset, pstate)
+                try:
+                    offset += handler(self, jpeg_bytes, offset, pstate)
+                except: # Everything we catch here is really internal crap
+                    logger.error("Internal JPEG decoder error")
+
             else:
                 length = unpack_from("!H", jpeg_bytes, offset + 2)[0]
                 logger.warn("Unknown block %x:%x len=%d at offset=%d" % (head_lo, head_hi, length, offset))
@@ -966,13 +966,13 @@ class JpegFile:
         (head_lo, head_hi, length, table_index) = unpack_from('!BBHB', data, offset)
         if head_lo != 0xff and head_hi != 0xdb:
             logger.error("Failed to find DQT header")
-            return None
+            return length+2
         logger.info("Parsing Quantization block id=%x:%x len=%d table=%d" % (head_lo, head_hi, length, table_index))
         offset += 5
         qt = data[offset:offset+length-3]
         if len(qt) != 64:
             logger.error("DQT table should be 64bytes. Got %d" % len(qt))
-            return None
+            return length+2
 
         table = bytearray(64)
         table[0] = qt[0]
@@ -1499,24 +1499,33 @@ class ReferenceJpeg(object):
         return data
 
 
-def serialize_scanlines(image, quality):
+def serialize_scanlines(image, quality, default_tables=True):
     """
     Serializes scanlines using default tables
-    :param image:
-    :param quality:int
-    :return:
+    :param image:JpegFile with decoded pixel data
+    :param quality:int quality level, in percents
+    :return:bytearray with encoded scanlines
     """
     if image.kind not in ('g', 'rgb', 'cmyk'):
         raise ValueError('Invalid image kind.')
+
     w, h, n = image.width, image.height, image.n
+
+    if image.data is None:
+        raise ValueError('Image contains no pixel data')
+
+    if w == 0 or h == 0:
+        raise ValueError('Image has wrong size: %dx%d' % (w, h))
 
     ydc = udc = vdc = kdc = 0
     # This one serializes using standard huffman table
     yblock, ublock, vblock, kblock = [0] * 64, [0] * 64, [0] * 64, [0] * 64
+    # TODO: We should able to use tables from JpegFile
     lq = _quantization_table(_luminance_quantization, quality)
-    ld = _huffman_table(_lum_dc_codelens, _lum_dc_symbols)
-    la = _huffman_table(_lum_ac_codelens, _lum_ac_symbols)
+    ld = _huffman_table(_lum_dc_code_length, _lum_dc_symbols)
+    la = _huffman_table(_lum_ac_code_length, _lum_ac_symbols)
     ls = _scale_factor(lq)
+
     if n == 3:
         cq = _quantization_table(_chrominance_quantization, quality)
         cd = _huffman_table(_chm_dc_codelens, _chm_dc_symbols)
@@ -1562,14 +1571,22 @@ def serialize_scanlines(image, quality):
 
 
 def serialize(image, quality):
+    """
+    Serializes JPEG to a bytearray.
+    It can be dumped to jpeg file directly
+    :param image:JpegFile or ReferenceJpeg with decoded image data
+    :param quality:int quality, in percents
+    :return:bytes serialized image
+    """
     if image.kind not in ('g', 'rgb', 'cmyk'):
         raise ValueError('Invalid image kind.')
+
     w, h, n = image.width, image.height, len(image.components)
     data = serialize_scanlines(image, quality)
 
     lq = _quantization_table(_luminance_quantization, quality)
-    ld = _huffman_table(_lum_dc_codelens, _lum_dc_symbols)
-    la = _huffman_table(_lum_ac_codelens, _lum_ac_symbols)
+    ld = _huffman_table(_lum_dc_code_length, _lum_dc_symbols)
+    la = _huffman_table(_lum_ac_code_length, _lum_ac_symbols)
     ls = _scale_factor(lq)
     if n == 3:
         cq = _quantization_table(_chrominance_quantization, quality)
@@ -1581,7 +1598,7 @@ def serialize(image, quality):
     sof = b'\10' + pack('>HHB', h, w, n) + b'\1\21\0' # depth, id, sampling, qtable
     sos = pack('B', n) + b'\1\0'  # id, htable
     dqt = b'\0' + lq
-    dht = b'\0' + _lum_dc_codelens + _lum_dc_symbols + b'\20' + _lum_ac_codelens + _lum_ac_symbols
+    dht = b'\0' + _lum_dc_code_length + _lum_dc_symbols + b'\20' + _lum_ac_code_length + _lum_ac_symbols
     if n == 3:
         sof += b'\2\21\1\3\21\1'
         sos += b'\2\21\3\21'

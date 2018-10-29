@@ -13,6 +13,11 @@ RTP_PT_JPEG = 26
 JPG_HDR_SIZE = 8  # Number of bytes for RTP-JPG header
 DRI_SIZE = 4  # Number of bytes for DRI
 
+"""
+TODO: Check huffman table inside jpeg. We need to repack it
+if it differs from the default one
+"""
+
 
 class RtpJpegEncoder(RtpFrameGenerator):
     """
@@ -35,6 +40,10 @@ class RtpJpegEncoder(RtpFrameGenerator):
         return delta
 
     def _create_rtp_packet(self):
+        """
+        Constructs RTP packet. It should be filled later
+        :return:
+        """
         ssrc = 0
         return RtpPacket(payload_type=RTP_PT_JPEG, ssrc=ssrc)
 
@@ -59,78 +68,6 @@ class RtpJpegEncoder(RtpFrameGenerator):
         :param frame_length:int
         :return:bytes RTP mjpeg payload
         """
-        """
-        // Initialize JPEG header. OK
-        jpghdr.tspec = typespec;
-        jpghdr.off = 0;
-        jpghdr.type = type | ((dri != 0) ? RTP_JPEG_RESTART : 0);
-        jpghdr.q = q;
-        jpghdr.width = width / 8;
-        jpghdr.height = height / 8;
-
-        // Initialize DRI header.   OK
-        if (dri != 0) {
-            struct jpeghdr_rst {
-                    u_int16 dri;
-                    unsigned int f:1;
-                    unsigned int l:1;
-                    unsigned int count:14;
-            };
-            rsthdr.dri = dri;
-            rsthdr.f = 1;        /* This code does not align RIs */
-            rsthdr.l = 1;
-            rsthdr.count = 0x3fff;
-        }
-
-        /* Initialize quantization table header */
-        if (q >= 128) {
-            qtblhdr.mbz = 0;
-            qtblhdr.precision = 0; /* This code uses 8 bit tables only */
-            qtblhdr.length = 128;  /* 2 64-byte tables */
-        }
-        """
-        """
-        while (bytes_left > 0)
-        {
-            ptr = packet_buf
-
-            memcpy(packet_buf, &rtphdr, RTP_HDR_SZ);
-            ptr += RTP_HDR_SZ;
-
-            memcpy(ptr, &jpghdr, sizeof(jpghdr));
-            ptr += sizeof(jpghdr);
-
-            if (dri != 0)
-            {
-                memcpy(ptr, &rsthdr, sizeof(rsthdr));
-                ptr += sizeof(rsthdr);
-            }
-
-            if (q >= 128 && jpghdr.off == 0) {
-                memcpy(ptr, &qtblhdr, sizeof(qtblhdr));
-                ptr += sizeof(qtblhdr);
-                memcpy(ptr, lqt, 64);
-                ptr += 64;
-                memcpy(ptr, cqt, 64);
-                ptr += 64;
-            }
-
-            data_len = PACKET_SIZE - (ptr - packet_buf);
-            if (data_len >= bytes_left) {
-                data_len = bytes_left;
-                rtphdr.m = 1;
-            }
-
-            memcpy(ptr, jpeg_data + jpghdr.off, data_len);
-
-            send_packet(packet_buf, (ptr - packet_buf) + data_len);
-
-            jpghdr.off += data_len;
-            bytes_left -= data_len;
-            rtphdr.seq++;
-        }
-        return rtphdr.seq;
-        """
         offset = 0
         hoffset = (jpeg_offset >> 16) & 0xff
         loffset = jpeg_offset & 0xffff
@@ -152,13 +89,13 @@ class RtpJpegEncoder(RtpFrameGenerator):
         if len(output) != offset:
             raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
 
-        if jpeg.dri is not None:
+        if jpeg.reset_interval:
             l = 1
             h = 1
             flags = l & 0x1
             flags |= (h << 1) & 0x2
             flags |= (0x3fff << 2)
-            dri = pack('!HH', jpeg.dri, flags)
+            dri = pack('!HH', jpeg.reset_interval, flags)
             output += dri
             offset += 4
 
@@ -179,6 +116,7 @@ class RtpJpegEncoder(RtpFrameGenerator):
 
         if len(output) != offset:
             raise RuntimeError("Miscalculated offset vs output: %d vs %d" % (offset, len(output)))
+
         # TODO: Should crimp it
         max_jpeg_len = len(jpeg.image_data)
         next_jpeg_pos = min(max_jpeg_len, jpeg_offset+(frame_length-offset))
@@ -195,18 +133,6 @@ class RtpJpegEncoder(RtpFrameGenerator):
         :param max_datagram_size:
         :return:
         """
-        """
-        // Initialize RTP header
-        rtphdr.version = 2;
-        rtphdr.p = 0;
-        rtphdr.x = 0;
-        rtphdr.cc = 0;
-        rtphdr.m = 0;
-        rtphdr.pt = RTP_PT_JPEG;
-        rtphdr.seq = start_seq;
-        rtphdr.ts = ts;
-        rtphdr.ssrc = ssrc;
-        """
         jpeg_offset = 0
         total_length = len(jpeg.image_data)
         result = []
@@ -219,13 +145,8 @@ class RtpJpegEncoder(RtpFrameGenerator):
             packet.timestamp = self.get_timestamp_90khz(timestamp)
 
             frame_length = min(max_datagram_size, total_length-jpeg_offset)
-            #data, jpeg_offset = self.make_rtp_frame_payload(jpeg, jpeg_offset, frame_length)
             data, jpeg_offset = self.make_rtp_frame_payload(jpeg, jpeg_offset, max_datagram_size)
             done = jpeg_offset >= total_length
-
-            #if first:
-            #    packet.marker = 1
-            #    first = False
 
             if done:
                 packet.marker = 1

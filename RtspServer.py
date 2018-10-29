@@ -1,6 +1,6 @@
 from random import randint
 import re
-
+import logging
 from RtpServer import RtpServer
 
 from HttpMessage import HttpMessage
@@ -10,7 +10,7 @@ from tornado.iostream import StreamClosedError
 from tornado.ioloop import IOLoop
 from tornado import gen
 
-__author__ = 'Tibbers'
+__author__ = 'Tibbers, Dmitry Kargin'
 
 
 # Dumps list data to a semicolon-separated string
@@ -37,55 +37,6 @@ class Protocol:
     PAUSE = 'PAUSE'
     TEARDOWN = 'TEARDOWN'
 
-
-# RTSP Status codes from rfc-2326
-StatusCodes = {
-    100: 'Continue',
-    200: 'OK',
-    201: 'Created',
-    250: 'Low on Storage Space',
-    300: 'Multiple Choices',
-    301: 'Moved Permanently',
-    302: 'Moved Temporarily',
-    303: 'See Other',
-    304: 'Not Modified',
-    305: 'Use Proxy',
-    400: 'Bad Request',
-    401: 'Unauthorized',
-    402: 'Payment Required',
-    403: 'Forbidden',
-    404: 'Not Found',
-    405: 'Method Not Allowed',
-    406: 'Not Acceptable',
-    407: 'Proxy Authentication Required',
-    408: 'Request Time - out',
-    410: 'Gone',
-    411: 'Length Required',
-    412: 'Precondition Failed',
-    413: 'Request Entity Too Large',
-    414: 'Request - URI Too Large',
-    415: 'Unsupported Media Type',
-    451: 'Parameter Not Understood',
-    452: 'Conference Not Found',
-    453: 'Not Enough Bandwidth',
-    454: 'Session Not Found',
-    455: 'Method Not Valid in This State',
-    456: 'Header Field Not Valid for Resource',
-    457: 'Invalid Range',
-    458: 'Parameter Is Read - Only',
-    459: 'Aggregate operation not allowed',
-    460: 'Only aggregate operation allowed',
-    461: 'Unsupported transport',
-    462: 'Destination unreachable',
-    500: 'Internal Server Error',
-    501: 'Not Implemented',
-    502: 'Bad Gateway',
-    503: 'Service Unavailable',
-    504: 'Gateway Time - out',
-    505: 'RTSP Version not supported',
-    551: 'Option not supported'
-}
-
 INIT = 0
 READY = 1
 PLAYING = 2
@@ -99,8 +50,6 @@ class ClientInfo:
     It mostly covers transport stuff
     """
     def __init__(self, address, id):
-        # Port range to receive RTP data
-        print("Generating ClientInfo for %s, id=%d" % (str(address), id))
         # Unique ID of this client
         self.id = id
         # IP address, that was obtained from http/rtsp session
@@ -204,6 +153,8 @@ class RtspServer(TCPServer):
         :param stream_factory:function(url) generator for RTP packet provider
         """
         super(RtspServer, self).__init__()
+
+        self.logger = logging.getLogger('RtspServer')
         # Maps address->client
         self.clients = {}
         self.video_opt = {'video_port': 8400}
@@ -216,7 +167,7 @@ class RtspServer(TCPServer):
         self._last_client_id = 0
         # Generate a randomized RTSP session ID
         self._session = randint(100000, 999999)
-        print("Starting session id=%d at port %d" % (self._session, port))
+        self.logger.debug("Starting session id=%d at port %d" % (self._session, port))
 
         self.listen(port)
 
@@ -245,13 +196,13 @@ class RtspServer(TCPServer):
                 request_raw = yield stream.read_until(b'\r\n\r\n')
                 #request_raw = sock.recv(256)
                 if request_raw is None or len(request_raw) == 0:
-                    print("Should close a socket for some reason")
+                    self.logger.warn("Should close a socket for some reason")
                     break
 
                 yield from self._handle_raw_request(stream, request_raw, address)
 
             except StreamClosedError:
-                print("Stream from %s has been closed" % str(address))
+                self.logger.warn("Stream from %s has been closed" % str(address))
                 self._remove_client(address)
                 break
 
@@ -281,11 +232,10 @@ class RtspServer(TCPServer):
                     out = None
 
                 if isinstance(cmd, self.CmdRTSPResponse):  # Generated http response
-                    response_data = self._serialise_reply_rtsp(cmd)
-                    print("Responding=%s" % response_data)
+                    response_data = HttpMessage.serialise_rtsp(cmd.code, cmd.seq, cmd.values, cmd.data)
+                    self.logger.debug("Responding=%s" % response_data)
                     yield stream.write(response_data.encode())
                     responses += 1
-
                 elif isinstance(cmd, self.CmdOpenRTP):  # Should open UDP port for streaming
                     self._rtp_server.add_destination(cmd.client, (cmd.client.address, cmd.client.rtp_ports.start))
                     self._rtp_server.start()
@@ -300,15 +250,17 @@ class RtspServer(TCPServer):
                         self.clients[address_str] = client
                         out = client # Will send it back to coroutine
                     else:
-                        print("Picking existing ClientInfo for %s" % str(address))
+                        self.logger.debug("Picking existing ClientInfo for %s" % str(address))
                         out = self._get_client()
+                else:
+                    raise Exception("Unhandled yield result: %s" % str(type(cmd)))
 
             except StopIteration:
                 break
 
         if responses != 1:
             # TODO: Just send a default server response here
-            raise ("RTSP FSM is broken. Have generated %d responses instead of single one!" % responses)
+            raise Exception("RTSP FSM is broken. Have generated %d responses instead of single one!" % responses)
 
     # RTSP method handlers
 
@@ -329,7 +281,7 @@ class RtspServer(TCPServer):
 
         url = request.url
 
-        print("Initializing stream for %s" % url.path)
+        self.logger.info("Initializing stream for %s" % url.path)
 
         if self._stream is None:
             # TODO: Make a proper stream pool
@@ -373,14 +325,14 @@ class RtspServer(TCPServer):
         transport = request.get('transport')
 
         if transport is None:
-            print("No transport info specified")
+            self.logger.warn("No transport info specified")
             yield self.CmdRTSPResponse(self.UNSUPPORTED_TRANSPORT_461, seq)
             return
 
         client.parse_transport_options(transport)
 
         if client.interleaved:
-            print("Interleaved RTSP stream is not supported")
+            self.logger.warn("Interleaved RTSP stream is not supported")
             values = {
                 'Transport': request.get('transport')
             }
@@ -416,7 +368,6 @@ class RtspServer(TCPServer):
         Process PLAY request
         :param request:HttpMessage
         """
-
         """
         Example RTP-Info:
         RTP-Info: url=rtsp://192.168.0.254/jpeg/track1;seq=20730;rtptime=3869319494,url=rtsp://192.168.0.254/jpeg/track2;seq=33509;rtptime=3066362516
@@ -433,13 +384,13 @@ class RtspServer(TCPServer):
         }
 
         if client.state == READY:
-            print("READY->PLAYING")
+            self.logger.debug("READY->PLAYING")
             client.set_state(PLAYING)
             yield self.CmdRTSPResponse(self.OK_200, request.seq, **values)
             return
         # Process RESUME request
         elif client.state == PAUSE:
-            print("PAUSE->PLAYING")
+            self.logger.warn("PAUSE->PLAYING")
             client.set_state(PLAYING)
             yield self.CmdRTSPResponse(self.OK_200, request.seq, **values)
             return
@@ -452,7 +403,7 @@ class RtspServer(TCPServer):
         :param request:HttpMessage
         """
         if client.state == PLAYING:
-            print('PLAYING->READY')
+            logger.warn('PLAYING->READY')
             client.set_state(READY)
             yield self.CmdRTSPResponse(self.OK_200, request.seq)
         else:
@@ -472,10 +423,10 @@ class RtspServer(TCPServer):
         Coroutine that process RTSP protocol sequence
         @:rtype: tuple with HTTP status and data
         """
-        print('-'*60)
+        #self.logger.warn('-'*60)
         request = HttpMessage()
         if not request.deserialize(raw_data):
-            print("Corrupted RTSP request")
+            self.logger.error("Corrupted RTSP request")
             yield self.CmdRTSPResponse(self.BAD_REQUEST_400, request.seq)
             return
 
@@ -485,42 +436,8 @@ class RtspServer(TCPServer):
         if handler is not None:
             yield from handler(self, request, client)
         else:
-            print("Unhandled RTSP method %s!!!" % str(request.type))
+            self.logger.error("Unhandled RTSP method %s!!!" % str(request.type))
             yield self.CmdRTSPResponse(self.METHOD_NOT_ALLOWED_405, request.seq)
-
-    def _serialise_reply_rtsp(self, reply):
-        """
-        :param sock: Socket to send data
-        :param reply:ServerWorker.CmdRTSPResponse http reply
-        :return:
-        """
-        # TODO: move it to HttpMessage.serialize
-        code = reply.code
-
-        msg = 'RTSP/1.0 %d %s\r\n' % (code, StatusCodes.get(code, 'Unknown code'))
-
-        # Send RTSP reply to the client
-
-        def add_data(data, field, value):
-            data += ("%s: %s\r\n" % (str(field), str(value)))
-            return data
-
-        if reply.seq is not None:
-            msg = add_data(msg, 'CSeq', reply.seq)
-        if reply.values is not None:
-            for key, value in reply.values.items():
-                msg = add_data(msg, key, value)
-
-        if reply.data is not None and len(reply.data) > 0:
-            data = str(reply.data)
-            msg = add_data(msg, 'Content-Length', len(data))
-            msg += '\r\n'
-            msg += data
-        else:
-            # Finish him!
-            msg += '\r\n'
-
-        return msg
 
     # Dispatching table for RTSP requests
     _dispatch_table = {
