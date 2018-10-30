@@ -35,6 +35,7 @@ def compare_huffman(a, b):
     :param b:HuffmanCachedTable
     :return:
     """
+    pass
 #
 print("Testing reference loader")
 ref_image = ReferenceJpeg(raw_data)

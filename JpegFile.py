@@ -18,6 +18,7 @@ https://tools.ietf.org/html/rfc2435
 Used as a reference RTP-MJPEG packetizer
 """
 
+
 def clamp(x):
     """
     Clamps value to the range [0, 255]
@@ -204,9 +205,7 @@ def _forward_dct(block):
     # Ref.: Independent JPEG Group's "jfdctint.c", v8d
     # Copyright (C) 1994-1996, Thomas G. Lane
     # Modification developed 2003-2009 by Guido Vollbeding
-
     """
-
     :param block: contains input data. Output will be stored right here
     """
     for i in range(0, 64, 8):
@@ -222,26 +221,26 @@ def _forward_dct(block):
         tmp1 = block[i+1] - block[i+6]
         tmp2 = block[i+2] - block[i+5]
         tmp3 = block[i+3] - block[i+4]
-        block[i] = (tmp10 + tmp11 - 8*128) << 2 # PASS1_BITS
+        block[i] = (tmp10 + tmp11 - 8*128) << 2  # PASS1_BITS
         block[i+4] = (tmp10 - tmp11) << 2
-        z1 = (tmp12 + tmp13)*4433 # FIX_0_541196100
-        z1 += 1024 # 1 << (CONST_BITS-PASS1_BITS-1)
-        block[i+2] = (z1 + tmp12*6270) >> 11 # FIX_0_765366865
-        block[i+6] = (z1 - tmp13*15137) >> 11 # FIX_1_847759065
+        z1 = (tmp12 + tmp13)*4433  # FIX_0_541196100
+        z1 += 1024  # 1 << (CONST_BITS-PASS1_BITS-1)
+        block[i+2] = (z1 + tmp12*6270) >> 11  # FIX_0_765366865
+        block[i+6] = (z1 - tmp13*15137) >> 11  # FIX_1_847759065
         tmp10 = tmp0 + tmp3
         tmp11 = tmp1 + tmp2
         tmp12 = tmp0 + tmp2
         tmp13 = tmp1 + tmp3
-        z1 = (tmp12 + tmp13)*9633 # FIX_1_175875602
-        z1 += 1024 # 1 << (CONST_BITS-PASS1_BITS-1)
-        tmp0 = tmp0*12299 # FIX_1_501321110
-        tmp1 = tmp1*25172 # FIX_3_072711026
-        tmp2 = tmp2*16819 # FIX_2_053119869
-        tmp3 = tmp3*2446 # FIX_0_298631336
-        tmp10 = tmp10*-7373 # FIX_0_899976223
-        tmp11 = tmp11*-20995 # FIX_2_562915447
-        tmp12 = tmp12*-3196 # FIX_0_390180644
-        tmp13 = tmp13*-16069 # FIX_1_961570560
+        z1 = (tmp12 + tmp13)*9633  # FIX_1_175875602
+        z1 += 1024  # 1 << (CONST_BITS-PASS1_BITS-1)
+        tmp0 = tmp0*12299  # FIX_1_501321110
+        tmp1 = tmp1*25172  # FIX_3_072711026
+        tmp2 = tmp2*16819  # FIX_2_053119869
+        tmp3 = tmp3*2446  # FIX_0_298631336
+        tmp10 = tmp10*-7373  # FIX_0_899976223
+        tmp11 = tmp11*-20995  # FIX_2_562915447
+        tmp12 = tmp12*-3196  # FIX_0_390180644
+        tmp13 = tmp13*-16069  # FIX_1_961570560
         tmp12 += z1
         tmp13 += z1
         block[i+1] = (tmp0 + tmp10 + tmp12) >> 11
@@ -254,7 +253,7 @@ def _forward_dct(block):
         tmp1 = block[i+8] + block[i+48]
         tmp2 = block[i+16] + block[i+40]
         tmp3 = block[i+24] + block[i+32]
-        tmp10 = tmp0 + tmp3 + 2 # 1 << (PASS1_BITS-1)
+        tmp10 = tmp0 + tmp3 + 2  # 1 << (PASS1_BITS-1)
         tmp12 = tmp0 - tmp3
         tmp11 = tmp1 + tmp2
         tmp13 = tmp1 - tmp2
@@ -262,29 +261,29 @@ def _forward_dct(block):
         tmp1 = block[i+8] - block[i+48]
         tmp2 = block[i+16] - block[i+40]
         tmp3 = block[i+24] - block[i+32]
-        block[i] = (tmp10 + tmp11) >> 2 # PASS1_BITS
+        block[i] = (tmp10 + tmp11) >> 2  # PASS1_BITS
         block[i+32] = (tmp10 - tmp11) >> 2
-        z1 = (tmp12 + tmp13)*4433 # FIX_0_541196100
-        z1 += 16384 # 1 << (CONST_BITS+PASS1_BITS-1)
-        block[i+16] = (z1 + tmp12*6270) >> 15 # FIX_0_765366865, CONST_BITS+PASS1_BITS
-        block[i+48] = (z1 - tmp13*15137) >> 15 # FIX_1_847759065
+        z1 = (tmp12 + tmp13)*4433  # FIX_0_541196100
+        z1 += 16384  # 1 << (CONST_BITS+PASS1_BITS-1)
+        block[i+16] = (z1 + tmp12*6270) >> 15  # FIX_0_765366865, CONST_BITS+PASS1_BITS
+        block[i+48] = (z1 - tmp13*15137) >> 15  # FIX_1_847759065
         tmp10 = tmp0 + tmp3
         tmp11 = tmp1 + tmp2
         tmp12 = tmp0 + tmp2
         tmp13 = tmp1 + tmp3
-        z1 = (tmp12 + tmp13)*9633 # FIX_1_175875602
+        z1 = (tmp12 + tmp13)*9633  # FIX_1_175875602
         z1 += 16384 # 1 << (CONST_BITS+PASS1_BITS-1)
-        tmp0 = tmp0*12299 # FIX_1_501321110
-        tmp1 = tmp1*25172 # FIX_3_072711026
-        tmp2 = tmp2*16819 # FIX_2_053119869
-        tmp3 = tmp3*2446 # FIX_0_298631336
-        tmp10 = tmp10*-7373 # FIX_0_899976223
-        tmp11 = tmp11*-20995 # FIX_2_562915447
-        tmp12 = tmp12*-3196 # FIX_0_390180644
-        tmp13 = tmp13*-16069 # FIX_1_961570560
+        tmp0 = tmp0*12299  # FIX_1_501321110
+        tmp1 = tmp1*25172  # FIX_3_072711026
+        tmp2 = tmp2*16819  # FIX_2_053119869
+        tmp3 = tmp3*2446  # FIX_0_298631336
+        tmp10 = tmp10*-7373  # FIX_0_899976223
+        tmp11 = tmp11*-20995  # FIX_2_562915447
+        tmp12 = tmp12*-3196  # FIX_0_390180644
+        tmp13 = tmp13*-16069  # FIX_1_961570560
         tmp12 += z1
         tmp13 += z1
-        block[i+8] = (tmp0 + tmp10 + tmp12) >> 15 # CONST_BITS+PASS1_BITS
+        block[i+8] = (tmp0 + tmp10 + tmp12) >> 15  # CONST_BITS+PASS1_BITS
         block[i+24] = (tmp1 + tmp11 + tmp13) >> 15
         block[i+40] = (tmp2 + tmp11 + tmp12) >> 15
         block[i+56] = (tmp3 + tmp10 + tmp13) >> 15
@@ -625,6 +624,7 @@ class JpegFile:
 
         # bytearray with raw scanlines from jpeg file
         self._image_data = None
+        self.pixels = None
 
         # Thumbnail stuff
         self._has_thumbnail = False
@@ -646,7 +646,7 @@ class JpegFile:
 
         self.transform = False
         self._parse_state = None
-
+        self._raw_blocks = []
 
     # Reset parser to initial state
     def reset(self):
@@ -713,7 +713,6 @@ class JpegFile:
             return False
 
         pstate = self._parse_state
-
         pstate.done = False
 
         while offset+4 < end and not pstate.done:
@@ -725,7 +724,7 @@ class JpegFile:
             if handler:
                 try:
                     offset += handler(self, jpeg_bytes, offset, pstate)
-                except: # Everything we catch here is really internal crap
+                except:  # Everything we catch here is really internal crap
                     logger.error("Internal JPEG decoder error")
 
             else:
@@ -836,7 +835,6 @@ class JpegFile:
 
         for i in range(0, num_components):
             (comp_id, comp_sampling, quant_table) = unpack_from("!3B", data, offset+pos)
-            #comp_id, comp_sampling, destination = readable.parse('>BBB')
             h, v = comp_sampling >> 4, comp_sampling & 15
             if h not in (1, 2, 4):
                 raise ValueError('Invalid horizontal sampling factor.')
@@ -919,39 +917,50 @@ class JpegFile:
             int8[16] ht_header
             int8[] table_data
         """
-        (app_l, app_h, length, table_flags) = unpack_from("!BBHB", data, offset)
+        (app_l, app_h, length) = unpack_from("!BBH", data, offset)
+        offset += 4
+
         if app_l != 0xff or app_h != 0xc4 or length < 16:
             logger.error("Wrong DHT block id=%x:%x len=%d" % (app_l, app_h, length))
 
         self.progressive = (app_h == 0xc2)
 
-        offset += 5
+        offset_end = offset + length - 2
 
-        identifier = table_flags & 0b111
+        while offset_end - offset > 17:
+            table_flags = data[offset]
+            offset += 1
+            identifier = table_flags & 0b111
 
-        if identifier >= 2:
-            raise ValueError('Unsupported htable destination identifier.')
+            if identifier >= 2:
+                raise ValueError('Unsupported htable destination identifier.')
 
-        is_dc = (table_flags & 0b0001000) == 0
+            is_dc = (table_flags & 0b0001000) == 0
 
-        # Obtaining header of the table
-        lengths = unpack_from("!BBBBBBBBBBBBBBBB", data, offset)
-        offset+=16
+            # Obtaining header of the table
+            lengths = unpack_from("!BBBBBBBBBBBBBBBB", data, offset)
+            offset += 16
 
-        total_len = 0
-        for l in lengths:
-            total_len += l
+            total_len = 0
+            for l in lengths:
+                total_len += l
 
-        if is_dc:
-            logger.debug("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" %
-                         (app_l, app_h, length, identifier, lengths, total_len))
-        else:
-            logger.debug("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" %
-                         (app_l, app_h, length, identifier, lengths, total_len))
+            if is_dc:
+                logger.info("Found id=%x:%x len=%d DHT DC table=%d header=%s table_len=%d" %
+                             (app_l, app_h, length, identifier, lengths, total_len))
+            else:
+                logger.info("Found id=%x:%x len=%d DHT AC table=%d header=%s table_len=%d" %
+                             (app_l, app_h, length, identifier, lengths, total_len))
 
-        values = data[offset:offset + total_len]
-        self.htables[table_flags] = HuffmanCachedTable(lengths, values)
-        pstate.found_dht += 1
+            values = data[offset:offset + total_len]
+            self.htables[table_flags] = HuffmanCachedTable(lengths, values)
+            pstate.found_dht += 1
+            offset += total_len
+
+        if offset != offset_end:
+            logger.error("DHT table parser has %d bytes left" % (offset_end - offset))
+            return length + 2
+
         return length + 2
 
     def _parse_start_of_frame_n(self, data, offset, pstate):
@@ -963,28 +972,43 @@ class JpegFile:
         return length+2
 
     def _parse_quant_block(self, data, offset, pstate):
-        (head_lo, head_hi, length, table_index) = unpack_from('!BBHB', data, offset)
+        (head_lo, head_hi, length) = unpack_from('!BBH', data, offset)
+        offset += 4
         if head_lo != 0xff and head_hi != 0xdb:
             logger.error("Failed to find DQT header")
-            return length+2
-        logger.info("Parsing Quantization block id=%x:%x len=%d table=%d" % (head_lo, head_hi, length, table_index))
-        offset += 5
-        qt = data[offset:offset+length-3]
-        if len(qt) != 64:
-            logger.error("DQT table should be 64bytes. Got %d" % len(qt))
-            return length+2
+            return length + 2
+        logger.info("Parsing Quantization block id=%x:%x len=%d" % (head_lo, head_hi, length))
 
-        table = bytearray(64)
-        table[0] = qt[0]
+        offset_end = offset + length - 2
 
-        i = 1
-        for z in _z_z:
-            table[z] = qt[i]
-        pstate.found_quant += 1
+        while offset_end - offset >= 65:
+            info = data[offset]
+            offset += 1
+            precision, table_index = info >> 4, info & 15
+            table_length = 64*(precision+1)
+            if precision != 0:  # Unsuported qtable element precision.
+                offset += table_length
+                continue
+            if table_index >= 4:  # Invalid qtable destination identifier.
+                offset += table_length
+                continue
+            qt = data[offset:offset+table_length]
+            table = bytearray(64)
+            table[0] = qt[0]
+            i = 1
+            for z in _z_z:
+                table[z] = qt[i]
 
-        self.qtables[table_index] = table
-        self.qtables_raw[table_index] = qt
-        offset += length
+            pstate.found_quant += 1
+
+            self.qtables[table_index] = table
+            self.qtables_raw[table_index] = qt
+            offset += table_length
+
+        if offset != offset_end:
+            logger.error("DQT table parser has %d bytes left" % (offset_end - offset))
+            return length + 2
+
         return 2+length
 
     def _parse_sos(self, data, offset, pstate):
@@ -1010,8 +1034,9 @@ class JpegFile:
             comp_name = component_map.get(comp_id, 'N')
             ac_table = table_flags & 0b1111
             dc_table = (table_flags >> 4) & 0b1111
-            logger.debug("\t- component %s uses Huffman AC table %d DC table %d" % (comp_name, ac_table, dc_table))
-            self.scans[comp_id] = _coding_destination(dc_table, 16|ac_table) # ACs always have Tc == 1
+            logger.info("\t- component %s uses Huffman AC table %d DC table %d" % (comp_name, ac_table, dc_table))
+            # ACs always have Tc == 1
+            self.scans[comp_id] = CodingDestination(dc_table, 16 | ac_table)
             pos += 2
 
         (scan_start, scan_end, bit_pos) = unpack_from('!BBB', data, offset+pos)
@@ -1033,9 +1058,8 @@ class JpegFile:
     def decompress(self):
         """
         Does full jpeg decompression
-        :return:
+        :return:bytearray decompressed pixel data
         """
-
         readable = Readable(self._image_data)
         data = decompress_impl(self, readable)
         return data
@@ -1143,8 +1167,10 @@ def _parse_sos(readable, scans):
     for i in range(n):
         selector, destinations = readable.parse('>BB')
         dc, ac = destinations >> 4, destinations & 15
-        scans[selector] = _coding_destination(dc, 16|ac) # ACs always have Tc == 1
-    readable.skip(3) # start, end, approximation
+        # ACs always have Tc == 1
+        scans[selector] = CodingDestination(dc, 16 | ac)
+    # start, end, approximation
+    readable.skip(3)
 
 
 def _parse_dri(readable):
@@ -1155,24 +1181,31 @@ def _parse_dri(readable):
 def _parse_app1(readable, length, rotation):
     end = readable.position + length
     if readable.peek('Exif\0\0'):
-        readable.skip(5 + 1) # header, padding
+        # header, padding
+        readable.skip(5 + 1)
         order = readable.uint16()
-        if order == 0x4d4d: # MM
+        # MM
+        if order == 0x4d4d:
             uint16, uint32 = readable.uint16, readable.uint32
-        elif order == 0x4949: # II
+        # II
+        elif order == 0x4949:
             uint16, uint32 = readable.uint16le, readable.uint32le
         else:
             raise ValueError('Invalid byte order.')
-        readable.skip(2) # 42
+        # 42
+        readable.skip(2)
         offset = uint32()
         if offset < 8:
             raise ValueError('Invalid IFD0 offset.')
         readable.skip(offset - 8)
         n = uint16()
+        # Reading IFD blocks
         for i in range(n):
             tag = uint16()
-            readable.skip(2 + 4) # kind, size
-            if tag == 0x112: # orientation
+            # kind, size
+            readable.skip(2 + 4)
+            # orientation
+            if tag == 0x112:
                 orientation = uint16()
                 if orientation < 1 or orientation > 8:
                     raise ValueError('Invalid orientation value.')
@@ -1187,13 +1220,15 @@ def _parse_app1(readable, length, rotation):
                 else:
                     raise ValueError('Unsupported orientation value.')
                 break
-            readable.skip(4) # value
+            # value
+            readable.skip(4)
     readable.jump(end)
     return rotation
 
 
 def _parse_app14(readable):
-    readable.skip(6 + 1 + 2 + 2) # tag, version, flags0, flags1
+    # tag, version, flags0, flags1
+    readable.skip(6 + 1 + 2 + 2)
     transform = readable.uint8()
     return transform
 
@@ -1205,7 +1240,7 @@ class Component(object):
         self.identifier, self.h, self.v, self.destination = identifier, h, v, destination
 
 
-class _coding_destination(object):
+class CodingDestination(object):
     __slots__ = 'dc', 'ac'
 
     def __init__(self, dc, ac):
@@ -1373,31 +1408,31 @@ class ReferenceJpeg(object):
                 raise ValueError('Invalid marker.')
             while marker == 0xff:
                 marker = r.uint8()
-            if marker == 0xd9: # EOI
+            if marker == 0xd9:  # EOI
                 raise ValueError('Invalid entropy-coded segment.')
-            if 0xd0 <= marker <= 0xd7: # RST
+            if 0xd0 <= marker <= 0xd7:  # RST
                 raise ValueError('Unexpected RST marker.')
             length = r.uint16() - 2
-            if 0xc0 <= marker <= 0xc2: # SOF0, SOF1, SOF2
+            if 0xc0 <= marker <= 0xc2:  # SOF0, SOF1, SOF2
                 self.width, self.height, self.kind, self.n = _parse_sof(r, self.components)
                 self.progressive = marker == 0xc2
                 if not app14:
                     self.transform = self.kind == 'rgb'
-            elif marker == 0xdb: # DQT
+            elif marker == 0xdb:  # DQT
                 _parse_dqt(r, length, self.qtables)
-            elif marker == 0xc4: # DHT
+            elif marker == 0xc4:  # DHT
                 _parse_dht(r, length, self.htables)
-            elif marker == 0xda: # SOS:
+            elif marker == 0xda:  # SOS:
                 _parse_sos(r, self.scans)
                 self.ecs = r.position
                 break
-            elif marker == 0xdd: # DRI
+            elif marker == 0xdd:  # DRI
                 self.reset_interval = _parse_dri(r)
-            elif marker == 0xe1: # APP1
+            elif marker == 0xe1:  # APP1
                 self.rotation = _parse_app1(r, length, self.rotation)
-            elif marker == 0xee: # APP14
+            elif marker == 0xee:  # APP14
                 self.transform, app14 = _parse_app14(r), True
-            elif 0xe0 <= marker <= 0xef or marker == 0xfe: # APP, COM
+            elif 0xe0 <= marker <= 0xef or marker == 0xfe:  # APP, COM
                 r.skip(length)
             else:
                 if marker == 0xc3:  # SOF3
@@ -1420,7 +1455,7 @@ class ReferenceJpeg(object):
 
         self.pixels = data
 
-        if not readable.peek(b'\xff\xd9'): # EOI
+        if not readable.peek(b'\xff\xd9'):  # EOI
             raise ValueError('Missing EOI segment.')
         return data
 
@@ -1511,7 +1546,7 @@ def serialize_scanlines(image, quality, default_tables=True):
 
     w, h, n = image.width, image.height, image.n
 
-    if image.data is None:
+    if image.pixels is None:
         raise ValueError('Image contains no pixel data')
 
     if w == 0 or h == 0:
@@ -1572,7 +1607,7 @@ def serialize_scanlines(image, quality, default_tables=True):
 
 def serialize(image, quality):
     """
-    Serializes JPEG to a bytearray.
+    Serializes JPEG to a bytearray using standard MJPEG tables
     It can be dumped to jpeg file directly
     :param image:JpegFile or ReferenceJpeg with decoded image data
     :param quality:int quality, in percents
@@ -1595,7 +1630,7 @@ def serialize(image, quality):
         cs = _scale_factor(cq)
 
     app = b'Adobe\0\144\200\0\0\0\0'  # tag, version, flags0, flags1, transform
-    sof = b'\10' + pack('>HHB', h, w, n) + b'\1\21\0' # depth, id, sampling, qtable
+    sof = b'\10' + pack('>HHB', h, w, n) + b'\1\21\0'  # depth, id, sampling, qtable
     sos = pack('B', n) + b'\1\0'  # id, htable
     dqt = b'\0' + lq
     dht = b'\0' + _lum_dc_code_length + _lum_dc_symbols + b'\20' + _lum_ac_code_length + _lum_ac_symbols
@@ -1610,7 +1645,7 @@ def serialize(image, quality):
     sos += b'\0\77\0'  # start, end, approximation
 
     output = BytesIO()
-    output.write(b'\xff\xd8')   # SOI
+    output.write(b'\xff\xd8')  # SOI
     if n == 4:
         output.write(_marker_segment(b'\xee', app))
     output.write(_marker_segment(b'\xdb', dqt))
@@ -1618,5 +1653,5 @@ def serialize(image, quality):
     output.write(_marker_segment(b'\xc4', dht))
     output.write(_marker_segment(b'\xda', sos))
     output.write(data)
-    output.write(b'\xff\xd9')   # EOI
+    output.write(b'\xff\xd9')  # EOI
     return output.getvalue()

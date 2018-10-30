@@ -1,8 +1,8 @@
 import argparse
 import logging
+
 """
 This example streams still jpeg frames
-
 File is determined by requested URL
 """
 

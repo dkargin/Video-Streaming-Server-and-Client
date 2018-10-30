@@ -3,7 +3,7 @@ from sdp_utils import make_sdp2
 from RtpFrameGenerator import RtpPacket, RtpFrameGenerator
 from time import time
 
-from JpegFile import JpegFile, serialize_scanlines
+from JpegFile import JpegFile, serialize_scanlines, ReferenceJpeg, serialize
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,25 @@ DRI_SIZE = 4  # Number of bytes for DRI
 TODO: Check huffman table inside jpeg. We need to repack it
 if it differs from the default one
 """
+
+
+def load_jpeg_file_as_standard(image_path, quality):
+    try:
+        with open(image_path, 'rb') as image_file:
+            raw_data = image_file.read()
+        ref_image = ReferenceJpeg(raw_data)
+        pixels = ref_image.decompress_ref()
+        out_data = serialize(ref_image, quality)
+        return out_data
+    except IOError:
+        return None
+
+
+def make_jpeg_data_standard(raw_data, quality):
+    ref_image = ReferenceJpeg(raw_data)
+    pixels = ref_image.decompress_ref()
+    out_data = serialize(ref_image, quality)
+    return out_data
 
 
 class RtpJpegEncoder(RtpFrameGenerator):
@@ -183,6 +202,7 @@ class RtpJpegFileStream(RtpJpegEncoder):
         self._frames = []
         self._packet_size = packet_size
         self._generator = None
+        self._quality=80
         self.read_data()
 
     def get_sdp(self, options):
@@ -191,12 +211,17 @@ class RtpJpegFileStream(RtpJpegEncoder):
         return super(RtpJpegFileStream, self).get_sdp(options)
 
     def read_data(self):
+        logger.info("Opening jpeg file %s"%self._path)
         file = open(self._path, 'rb')
-        raw_data = file.read()
+        raw_data_base = file.read()
         file.close()
+        logger.info("Starting JPEG decoding")
+        raw_data = make_jpeg_data_standard(raw_data_base, self._quality)
 
         if raw_data is None:
             raise IOError("Failed to open the file %s" % self._path)
+
+        logger.info("Done JPEG decoding")
         #logger.debug("Loaded %d bytes" % len(raw_data))
         self._jpeg.load_data(raw_data)
         timestamp = time()
